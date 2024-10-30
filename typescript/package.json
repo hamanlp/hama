@@ -1,0 +1,35 @@
+{
+  "name": "hama",
+  "version": "1.0.1",
+  "description": "Modern text analysis in Kilobytes",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "/dist"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.8.1",
+    "prettier": "3.3.3",
+    "typescript": "^5.6.3"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hamanlp/hama.git"
+  },
+  "keywords": [
+    "hangul",
+    "korean",
+    "nlp",
+    "g2p",
+    "pos-tagging"
+  ],
+  "author": "Seongmin Park",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/hamanlp/hama/issues"
+  },
+  "homepage": "https://github.com/hamanlp/hama#readme"
+}
