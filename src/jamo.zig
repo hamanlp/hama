@@ -2,13 +2,12 @@ const std = @import("std");
 
 const SyllablePosition = enum(u8) { CODA, NUCLEUS, ONSET, NOT_APPLICABLE };
 
-const DisassembleResult = struct {
+const DisassembleResult = extern struct {
     length: usize,
     is_hanguls: [*]bool,
     jamos: [*][*]u8,
     codepoint_lengths: [*]u3,
     positions: [*]SyllablePosition,
-    reserved_bytes: usize,
 };
 
 export fn cleanup(result: *DisassembleResult) void {
@@ -16,11 +15,9 @@ export fn cleanup(result: *DisassembleResult) void {
 }
 
 pub fn _cleanup(allocator: std.mem.Allocator, result: *DisassembleResult) void {
-    //const positions: std.ArrayList(SyllablePosition) = std.ArrayList.fromOwnedSlice(result.positions);
     allocator.free(result.is_hanguls[0..result.length]);
     const jamos = result.jamos[0..result.length];
     for (0..result.length) |i| {
-        //for (0..result.codepoint_lengths[i]) |j| {
         const length = result.codepoint_lengths[i];
         const codepoints: []u8 = jamos[i][0..length];
         allocator.free(codepoints);
@@ -28,7 +25,6 @@ pub fn _cleanup(allocator: std.mem.Allocator, result: *DisassembleResult) void {
     allocator.free(result.jamos[0..result.length]);
     allocator.free(result.codepoint_lengths[0..result.length]);
     allocator.free(result.positions[0..result.length]);
-    //allocator.destroy(result);
 }
 
 const chosungs: [19]u21 = .{
@@ -171,11 +167,10 @@ pub fn isWhitespace(c: u21) bool {
 test "testing disassemble with whitespace" {
     std.debug.print("DisassembleResult in bytes: {}\n", .{@sizeOf(DisassembleResult)});
     const allocator = std.testing.allocator;
-    const test_string = "주 4일제는 포기 못합니다. We'll make it work.";
+    const test_string = "주 4일제. We'll make it work.";
     const result = _disassemble(allocator, test_string);
     inline for (std.meta.fields(@TypeOf(result.*))) |field| {
-        _ = field.name;
-        //std.debug.print("Byte offset in bytes of {}: {}\n", .{ field.name, @offsetOf(result.*, field_name) });
+        std.debug.print("Byte offset in bytes of {s}: {}\n", .{ field.name, @offsetOf(DisassembleResult, field.name) });
     }
     std.debug.print("Jamos len {}\n", .{result.length});
     for (0..result.length) |index| {
