@@ -92,45 +92,29 @@ const jongsungs: [28]u21 = .{
     'ㅎ',
 };
 
-fn collect(is_hanguls: *std.ArrayList(bool), jamos: *std.ArrayList([*]u8), codepoint_lengths: *std.ArrayList(u3), positions: *std.ArrayList(SyllablePosition), is_hangul: bool, codepoint: u21, position: SyllablePosition) void {
-    const u8_len = std.unicode.utf8CodepointSequenceLength(codepoint) catch {
-        return;
-    };
-    const encoded = std.heap.page_allocator.alloc(u8, u8_len) catch {
-        return;
-    };
-    _ = std.unicode.utf8Encode(codepoint, encoded) catch {
-        return;
-    };
+fn collect(allocator: std.mem.Allocator, is_hanguls: *std.ArrayList(bool), jamos: *std.ArrayList([*]u8), codepoint_lengths: *std.ArrayList(u3), positions: *std.ArrayList(SyllablePosition), is_hangul: bool, codepoint: u21, position: SyllablePosition) void {
+    const u8_len = std.unicode.utf8CodepointSequenceLength(codepoint) catch unreachable;
+    const encoded = allocator.alloc(u8, u8_len) catch unreachable;
+    _ = std.unicode.utf8Encode(codepoint, encoded) catch unreachable;
 
-    is_hanguls.append(is_hangul) catch {
-        @panic("Error while collecting is_hangul");
-    };
-    jamos.append(encoded.ptr) catch {
-        @panic("Error while collecting jamo");
-    };
-    codepoint_lengths.append(u8_len) catch {
-        @panic("Error while collecting jamo");
-    };
-    positions.append(position) catch {
-        @panic("Error while collecting syllable position");
-    };
+    is_hanguls.append(is_hangul) catch unreachable;
+    jamos.append(encoded.ptr) catch unreachable;
+    codepoint_lengths.append(u8_len) catch unreachable;
+    positions.append(position) catch unreachable;
 }
 
 export fn disassemble(codepoints: [*:0]const u8) *DisassembleResult {
-    const alloc = std.heap.page_allocator;
+    return _disassemble(std.heap.page_allocator, codepoints);
+}
 
-    var unicode_codepoints = (std.unicode.Utf8View.init(std.mem.span(codepoints)) catch {
-        @panic("Error while converting to unicode");
-    }).iterator();
-    const result = std.heap.page_allocator.create(DisassembleResult) catch {
-        @panic("Error while allocating return object");
-    };
+pub fn _disassemble(allocator: std.mem.Allocator, codepoints: [*:0]const u8) *DisassembleResult {
+    var unicode_codepoints = (std.unicode.Utf8View.init(std.mem.span(codepoints)) catch unreachable).iterator();
+    const result = std.heap.page_allocator.create(DisassembleResult) catch unreachable;
 
-    var is_hanguls = std.ArrayList(bool).init(alloc);
-    var jamos = std.ArrayList([*]u8).init(alloc);
-    var codepoint_lengths = std.ArrayList(u3).init(alloc);
-    var positions = std.ArrayList(SyllablePosition).init(alloc);
+    var is_hanguls = std.ArrayList(bool).init(allocator);
+    var jamos = std.ArrayList([*]u8).init(allocator);
+    var codepoint_lengths = std.ArrayList(u3).init(allocator);
+    var positions = std.ArrayList(SyllablePosition).init(allocator);
 
     var i: u32 = 0;
     var ri: u32 = 0;
@@ -143,23 +127,21 @@ export fn disassemble(codepoints: [*:0]const u8) *DisassembleResult {
             const chosungCode = chosungs[@divTrunc(c - 0xAC00, (28 * 21))];
             const joongsungCode = joongsungs[@divTrunc((c - 0xAC00) % (28 * 21), 28)];
             const jongsungCode = jongsungs[@mod(@mod(c - 0xAC00, (28 * 21)), 28)];
-            //std.debug.print("{u}, {u}, {u}\n", .{ chosungCode, joongsungCode, jongsungCode });
 
-            collect(&is_hanguls, &jamos, &codepoint_lengths, &positions, true, chosungCode, SyllablePosition.ONSET);
+            collect(allocator, &is_hanguls, &jamos, &codepoint_lengths, &positions, true, chosungCode, SyllablePosition.ONSET);
             ri += 1;
 
-            collect(&is_hanguls, &jamos, &codepoint_lengths, &positions, true, joongsungCode, SyllablePosition.NUCLEUS);
+            collect(allocator, &is_hanguls, &jamos, &codepoint_lengths, &positions, true, joongsungCode, SyllablePosition.NUCLEUS);
             ri += 1;
 
             if (jongsungCode != 'N') {
-                collect(&is_hanguls, &jamos, &codepoint_lengths, &positions, true, jongsungCode, SyllablePosition.CODA);
+                collect(allocator, &is_hanguls, &jamos, &codepoint_lengths, &positions, true, jongsungCode, SyllablePosition.CODA);
                 ri += 1;
             }
         } else {
-            collect(&is_hanguls, &jamos, &codepoint_lengths, &positions, false, c, SyllablePosition.NOT_APPLICABLE);
+            collect(allocator, &is_hanguls, &jamos, &codepoint_lengths, &positions, false, c, SyllablePosition.NOT_APPLICABLE);
         }
     }
-    //storeToWasm(output, ri);
     result.is_hanguls = is_hanguls.items.ptr;
     result.is_hanguls_len = is_hanguls.items.len;
     result.jamos = jamos.items.ptr;
@@ -178,15 +160,14 @@ pub fn isWhitespace(c: u21) bool {
 }
 
 test "testing disassemble with whitespace" {
-    std.debug.print("{}\n", .{@sizeOf(DisassembleResult)});
-    const test_string = "하 이 fnf, 룽";
-    const result = disassemble(test_string);
+    std.debug.print("DisassembleResult in bytes: {}\n", .{@sizeOf(DisassembleResult)});
+    const allocator = std.testing.allocator;
+    const test_string = "주 4일제는 포기 못합니다. We'll make it work.";
+    const result = _disassemble(allocator, test_string);
     std.debug.print("Jamos len {}\n", .{result.jamos_len});
     for (0..result.jamos_len) |index| {
         const utf8_size = result.codepoint_lengths[index];
         const jamo = result.jamos[index][0..utf8_size];
         std.debug.print("Element {}: {s}\n", .{ index, jamo });
     }
-    //std.debug.print("", .{.ptrs});
-    //_ = ptrs;
 }
