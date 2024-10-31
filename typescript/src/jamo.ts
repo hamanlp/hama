@@ -1,11 +1,11 @@
-const fs = require("fs");
-
 const LENGTH_OFFSET: number = 0;
 const IS_HANGULS_OFFSET: number = 8;
 const JAMOS_OFFSET: number = 16;
 const CODEPOINT_LENGTHS_OFFSET: number = 24;
 const POSITIONS_OFFSET: number = 32;
 const nullByte = 0x00;
+
+import wasmUrl from "./hama.wasm";
 
 //const decodeNullTerminatedString = (pointer: number) => {
 //	const slice = new Uint8Array(memory.buffer, pointer);
@@ -16,6 +16,7 @@ const nullByte = 0x00;
 //		//free(pointer, length);
 //	}
 //};
+//
 //
 //
 //
@@ -36,6 +37,7 @@ class JamoParser {
   private _cleanup: CallableFunction | null = null;
   private _allocUint8: CallableFunction | null = null;
   private wasmFilePath: string;
+  private loaded: bool = false;
 
   constructor() {
     this.wasmFilePath = "/home/seongmin/hama/zig-out/bin/hama.wasm";
@@ -43,23 +45,23 @@ class JamoParser {
 
   async load(): Promise<void> {
     try {
-      const source = fs.readFileSync(this.wasmFilePath);
-      const typedArray = new Uint8Array(source); // Fetch the WASM file
-
-      // Compile the WASM module
-      this.wasmModule = await WebAssembly.compile(typedArray);
-
-      // Instantiate the WASM module
-      this.wasmInstance = await WebAssembly.instantiate(
-        this.wasmModule,
-        importObject,
-      );
-      this._disassemble = this.wasmInstance.exports
-        .disassemble as CallableFunction;
-      this._cleanup = this.wasmInstance.exports.cleanup as CallableFunction;
-      this._allocUint8 = this.wasmInstance.exports
-        .allocUint8 as CallableFunction;
-      this.memory = this.wasmInstance.exports.memory as WebAssembly.Memory;
+      if (WebAssembly.instantiate) {
+        const wasmFile = await Bun.file(
+          "/home/seongmin/hama/zig-out/bin/hama.wasm",
+        ).arrayBuffer();
+        const { instance } = await WebAssembly.instantiate(
+          wasmFile,
+          importObject,
+        );
+        this.wasmInstance = instance;
+        this._disassemble = this.wasmInstance.exports
+          .disassemble as CallableFunction;
+        this._cleanup = this.wasmInstance.exports.cleanup as CallableFunction;
+        this._allocUint8 = this.wasmInstance.exports
+          .allocUint8 as CallableFunction;
+        this.memory = this.wasmInstance.exports.memory as WebAssembly.Memory;
+        this.loaded = true;
+      }
     } catch (error) {
       console.error("Error loading WASM module:", error);
     }
@@ -124,6 +126,8 @@ class JamoParser {
     return func(...args);
   }
 }
+
+export { JamoParser };
 
 // Example of how to use the JamoParser class
 async function main() {
