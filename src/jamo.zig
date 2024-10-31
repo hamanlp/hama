@@ -4,11 +4,14 @@ const SyllablePosition = enum(u8) { CODA, NUCLEUS, ONSET, NOT_APPLICABLE };
 
 const DisassembleResult = extern struct {
     length: usize,
+    original_string: [*:0]u8,
     is_hanguls: [*]bool,
     jamos: [*][*]u8,
     codepoint_lengths: [*]u3,
     positions: [*]SyllablePosition,
 };
+
+extern fn jslog(content: u64) void;
 
 export fn cleanup(result: *DisassembleResult) void {
     _cleanup(std.heap.page_allocator, result);
@@ -114,6 +117,12 @@ fn collect(allocator: std.mem.Allocator, is_hanguls: *std.ArrayList(bool), jamos
     positions.append(position) catch unreachable;
 }
 
+export fn allocUint8(length: u32) [*]const u8 {
+    const slice = std.heap.page_allocator.alloc(u8, length) catch
+        @panic("failed to allocate memory");
+    return slice.ptr;
+}
+
 export fn disassemble(codepoints: [*:0]const u8) *DisassembleResult {
     return _disassemble(std.heap.page_allocator, codepoints);
 }
@@ -122,14 +131,14 @@ pub fn _disassemble(allocator: std.mem.Allocator, codepoints: [*:0]const u8) *Di
     var unicode_codepoints = (std.unicode.Utf8View.init(std.mem.span(codepoints)) catch unreachable).iterator();
 
     const result = std.heap.page_allocator.create(DisassembleResult) catch unreachable;
+    result.original_string = @constCast(codepoints);
 
     var is_hanguls = std.ArrayList(bool).init(allocator);
     var jamos = std.ArrayList([*]u8).init(allocator);
     var codepoint_lengths = std.ArrayList(u3).init(allocator);
     var positions = std.ArrayList(SyllablePosition).init(allocator);
 
-    var i: u32 = 0;
-    while (unicode_codepoints.nextCodepoint()) |c| : (i += 1) {
+    while (unicode_codepoints.nextCodepoint()) |c| {
         if (isWhitespace(c)) {
             continue;
         }
@@ -140,9 +149,7 @@ pub fn _disassemble(allocator: std.mem.Allocator, codepoints: [*:0]const u8) *Di
             const jongsungCode = jongsungs[@mod(@mod(c - 0xAC00, (28 * 21)), 28)];
 
             collect(allocator, &is_hanguls, &jamos, &codepoint_lengths, &positions, true, chosungCode, SyllablePosition.ONSET);
-
             collect(allocator, &is_hanguls, &jamos, &codepoint_lengths, &positions, true, joongsungCode, SyllablePosition.NUCLEUS);
-
             if (jongsungCode != 'N') {
                 collect(allocator, &is_hanguls, &jamos, &codepoint_lengths, &positions, true, jongsungCode, SyllablePosition.CODA);
             }

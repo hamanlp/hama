@@ -20,12 +20,21 @@ const nullByte = 0x00;
 //
 //
 //
+let importObject = {
+  env: {
+    jslog: function (x: number) {
+      console.log(x);
+    },
+  },
+};
 
 class JamoParser {
   private wasmModule: WebAssembly.Module | null = null;
   private wasmInstance: WebAssembly.Instance | null = null;
+  private memory: WebAssembly.Memory | null = null;
   private _disassemble: CallableFunction | null = null;
   private _cleanup: CallableFunction | null = null;
+  private _allocUint8: CallableFunction | null = null;
   private wasmFilePath: string;
 
   constructor() {
@@ -41,20 +50,65 @@ class JamoParser {
       this.wasmModule = await WebAssembly.compile(typedArray);
 
       // Instantiate the WASM module
-      this.wasmInstance = await WebAssembly.instantiate(this.wasmModule);
+      this.wasmInstance = await WebAssembly.instantiate(
+        this.wasmModule,
+        importObject,
+      );
       this._disassemble = this.wasmInstance.exports
         .disassemble as CallableFunction;
       this._cleanup = this.wasmInstance.exports.cleanup as CallableFunction;
+      this._allocUint8 = this.wasmInstance.exports
+        .allocUint8 as CallableFunction;
+      this.memory = this.wasmInstance.exports.memory as WebAssembly.Memory;
     } catch (error) {
       console.error("Error loading WASM module:", error);
     }
   }
 
+  encodeString(string): Uint8Array {
+    const buffer = new TextEncoder().encode(string);
+    const pointer = this._allocUint8(buffer.length + 1); // ask Zig to allocate memory
+    const slice = new Uint8Array(
+      this.memory.buffer, // memory exported from Zig
+      pointer,
+      buffer.length + 1,
+    );
+    slice.set(buffer);
+    slice[buffer.length] = 0; // null byte to null-terminate the string
+    return pointer;
+  }
+
   disassemble(text: string): string {
+    const encoded = this.encodeString(text);
+
     if (!this._disassemble) {
       throw new Error("disassemble function is not available");
     }
-    const pointer = this._disassemble(text);
+    const pointer = this._disassemble(encoded);
+    const view = new DataView(this.memory.buffer);
+    const length = view.getUint32(pointer, true);
+    console.log("jamo", pointer + 12);
+    //const jamos = new Uint32Array(this.memory.buffer, pointer + 12, length);
+    const jamos_pointer = view.getUint32(pointer + 12, true);
+    const jamos = new Uint32Array(this.memory.buffer, jamos_pointer, length);
+    const codepoint_lengths_pointer = view.getUint32(pointer + 16, true);
+    const codepoint_lengths = new Uint8Array(
+      this.memory.buffer,
+      codepoint_lengths_pointer,
+      length,
+    );
+    for (let i = 0; i < length; i++) {
+      const codepoint_array_pointer = jamos[i];
+      const codepoint_length = codepoint_lengths[i];
+      const codepoint_array = new Uint8Array(
+        this.memory.buffer,
+        codepoint_array_pointer,
+        codepoint_length,
+      );
+      const jamo = new TextDecoder().decode(codepoint_array);
+      console.log(jamo);
+    }
+    this._cleanup(pointer);
     return pointer;
   }
 
@@ -75,9 +129,9 @@ class JamoParser {
 async function main() {
   const j = new JamoParser();
   await j.load();
-  const pointer = j.disassemble("힘 내라 힘!");
-  
-  console.log(pointer);
+  const string = "힘 내라 힘!";
+  const pointer = j.disassemble(string);
+  console.log("Final", pointer);
 }
 
 // Call the main function to execute the example
