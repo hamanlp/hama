@@ -1,10 +1,15 @@
 import { createRequire } from "module";
-const LENGTH_OFFSET: number = 0;
-const ORIGINAL_STRING_OFFSET: number = 4;
-const IS_HANGULS_OFFSET: number = 8;
-const JAMOS_OFFSET: number = 12;
-const CODEPOINT_LENGTHS_OFFSET: number = 16;
-const POSITIONS_OFFSET: number = 20;
+const DISASSEMBLE_LENGTH_OFFSET: number = 0;
+const DISASSEMBLE_ORIGINAL_STRING_OFFSET: number = 4;
+const DISASSEMBLE_IS_HANGULS_OFFSET: number = 8;
+const DISASSEMBLE_JAMOS_OFFSET: number = 12;
+const DISASSEMBLE_CODEPOINT_LENGTHS_OFFSET: number = 16;
+const DISASSEMBLE_POSITIONS_OFFSET: number = 20;
+
+const ASSEMBLE_LENGTH_OFFSET: number = 0;
+const ASSEMBLE_ORIGINAL_STRING_OFFSET: number = 4;
+const ASSEMBLE_CHARACTERS_OFFSET: number = 8;
+const ASSEMBLE_CODEPOINT_LENGTHS_OFFSET: number = 12;
 const nullByte = 0x00;
 
 enum SyllablePosition {
@@ -20,6 +25,12 @@ type DisassembleResult = {
   is_hanguls: boolean[];
   jamos: string[];
   syllable_positions: SyllablePosition[];
+};
+
+type AssembleResult = {
+  length: number;
+  original_string: string;
+  characters: string[];
 };
 
 const decodeString = (buffer, pointer, length) => {
@@ -50,7 +61,9 @@ class JamoParser {
   private wasmInstance: WebAssembly.Instance | null = null;
   private memory: WebAssembly.Memory | null = null;
   private _disassemble: CallableFunction | null = null;
-  private _cleanup: CallableFunction | null = null;
+  private _cleanup_disassemble: CallableFunction | null = null;
+  private _assemble: CallableFunction | null = null;
+  private _cleanup_assemble: CallableFunction | null = null;
   private _allocUint8: CallableFunction | null = null;
   //private wasmFilePath: string;
   private loaded: Boolean = false;
@@ -84,7 +97,11 @@ class JamoParser {
       this.wasmInstance = wasmModule.instance;
       this._disassemble = this.wasmInstance.exports
         .disassemble as CallableFunction;
-      this._cleanup = this.wasmInstance.exports.cleanup as CallableFunction;
+      this._assemble = this.wasmInstance.exports.assemble as CallableFunction;
+      this._cleanup_disassemble = this.wasmInstance.exports
+        .cleanup_disassemble as CallableFunction;
+      this._cleanup_assemble = this.wasmInstance.exports
+        .cleanup_assemble as CallableFunction;
       this._allocUint8 = this.wasmInstance.exports
         .allocUint8 as CallableFunction;
       this.memory = this.wasmInstance.exports.memory as WebAssembly.Memory;
@@ -122,7 +139,7 @@ class JamoParser {
     const length = view.getUint32(pointer, true);
     // Get original string.
     const original_string_pointer = view.getUint32(
-      pointer + ORIGINAL_STRING_OFFSET,
+      pointer + DISASSEMBLE_ORIGINAL_STRING_OFFSET,
       true,
     );
     const original_string = decodeNullTerminatedString(
@@ -131,7 +148,7 @@ class JamoParser {
     );
     //Get is_hanguls.
     const is_hanguls_pointer = view.getUint32(
-      pointer + IS_HANGULS_OFFSET,
+      pointer + DISASSEMBLE_IS_HANGULS_OFFSET,
       true,
     );
     const is_hanguls_raw = new Uint8Array(
@@ -140,14 +157,17 @@ class JamoParser {
       length,
     );
     // Get jamos.
-    const jamos_pointer = view.getUint32(pointer + JAMOS_OFFSET, true);
+    const jamos_pointer = view.getUint32(
+      pointer + DISASSEMBLE_JAMOS_OFFSET,
+      true,
+    );
     const jamos_raw = new Uint32Array(
       this.memory.buffer,
       jamos_pointer,
       length,
     );
     const codepoint_lengths_pointer = view.getUint32(
-      pointer + CODEPOINT_LENGTHS_OFFSET,
+      pointer + DISASSEMBLE_CODEPOINT_LENGTHS_OFFSET,
       true,
     );
     // Get codepoint lengths.
@@ -157,7 +177,10 @@ class JamoParser {
       length,
     );
     // Get syllable positions.
-    const positions_pointer = view.getUint32(pointer + POSITIONS_OFFSET, true);
+    const positions_pointer = view.getUint32(
+      pointer + DISASSEMBLE_POSITIONS_OFFSET,
+      true,
+    );
     const positions_raw = new Uint8Array(
       this.memory.buffer,
       positions_pointer,
@@ -190,7 +213,71 @@ class JamoParser {
       jamos: jamos,
       syllable_positions: positions,
     };
-    this._cleanup(pointer);
+    this._cleanup_disassemble(pointer);
+    return result;
+  }
+
+  assemble(text: string): AssembleResult {
+    const encoded = this.encodeString(text);
+
+    if (!this._assemble) {
+      throw new Error("assemble function is not available");
+    }
+    const pointer = this._assemble(encoded);
+    const view = new DataView(this.memory.buffer);
+    const length = view.getUint32(pointer, true);
+
+    // Get original string.
+    const original_string_pointer = view.getUint32(
+      pointer + ASSEMBLE_ORIGINAL_STRING_OFFSET,
+      true,
+    );
+    const original_string = decodeNullTerminatedString(
+      this.memory.buffer,
+      original_string_pointer,
+    );
+
+    // Get characters.
+    const characters_pointer = view.getUint32(
+      pointer + ASSEMBLE_CHARACTERS_OFFSET,
+      true,
+    );
+    const characters_raw = new Uint32Array(
+      this.memory.buffer,
+      characters_pointer,
+      length,
+    );
+    const codepoint_lengths_pointer = view.getUint32(
+      pointer + ASSEMBLE_CODEPOINT_LENGTHS_OFFSET,
+      true,
+    );
+
+    // Get codepoint lengths.
+    const codepoint_lengths = new Uint8Array(
+      this.memory.buffer,
+      codepoint_lengths_pointer,
+      length,
+    );
+
+    // Collect results.
+    const characters = [];
+    for (let i = 0; i < length; i++) {
+      const codepoint_array_pointer = characters_raw[i];
+      const codepoint_length = codepoint_lengths[i];
+      const codepoint_array = new Uint8Array(
+        this.memory.buffer,
+        codepoint_array_pointer,
+        codepoint_length,
+      );
+      const character = new TextDecoder().decode(codepoint_array);
+      characters.push(character);
+    }
+    const result = {
+      length: length,
+      original_string: text,
+      characters: characters,
+    };
+    this._cleanup_assemble(pointer);
     return result;
   }
 
