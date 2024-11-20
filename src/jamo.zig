@@ -19,6 +19,82 @@ const AssembleResult = extern struct {
 };
 
 const AssembleState = enum(u2) { INIT, ONSET, ONSET_NUCLEUS };
+
+const chosungs: [19]u21 = .{
+    'ㄱ',
+    'ㄲ',
+    'ㄴ',
+    'ㄷ',
+    'ㄸ',
+    'ㄹ',
+    'ㅁ',
+    'ㅂ',
+    'ㅃ',
+    'ㅅ',
+    'ㅆ',
+    'ㅇ',
+    'ㅈ',
+    'ㅉ',
+    'ㅊ',
+    'ㅋ',
+    'ㅌ',
+    'ㅍ',
+    'ㅎ',
+};
+const joongsungs: [21]u21 = .{
+    'ㅏ',
+    'ㅐ',
+    'ㅑ',
+    'ㅒ',
+    'ㅓ',
+    'ㅔ',
+    'ㅕ',
+    'ㅖ',
+    'ㅗ',
+    'ㅘ',
+    'ㅙ',
+    'ㅚ',
+    'ㅛ',
+    'ㅜ',
+    'ㅝ',
+    'ㅞ',
+    'ㅟ',
+    'ㅠ',
+    'ㅡ',
+    'ㅢ',
+    'ㅣ',
+};
+
+const jongsungs: [28]u21 = .{
+    'N',
+    'ㄱ',
+    'ㄲ',
+    'ㄳ',
+    'ㄴ',
+    'ㄵ',
+    'ㄶ',
+    'ㄷ',
+    'ㄹ',
+    'ㄺ',
+    'ㄻ',
+    'ㄼ',
+    'ㄽ',
+    'ㄾ',
+    'ㄿ',
+    'ㅀ',
+    'ㅁ',
+    'ㅂ',
+    'ㅄ',
+    'ㅅ',
+    'ㅆ',
+    'ㅇ',
+    'ㅈ',
+    'ㅊ',
+    'ㅋ',
+    'ㅌ',
+    'ㅍ',
+    'ㅎ',
+};
 const OnsetIndex = std.StaticStringMap(u21).initComptime(.{
     .{ "ㄱ", 0 },
     .{ "ㄲ", 1 },
@@ -101,6 +177,10 @@ export fn cleanup_disassemble(result: *DisassembleResult) void {
     _cleanup_disassemble(std.heap.page_allocator, result);
 }
 
+export fn cleanup_assemble(result: *AssembleResult) void {
+    _cleanup_assemble(std.heap.page_allocator, result);
+}
+
 pub fn _cleanup_disassemble(allocator: std.mem.Allocator, result: *DisassembleResult) void {
     allocator.free(result.is_hanguls[0..result.length]);
     const jamos = result.jamos[0..result.length];
@@ -124,81 +204,6 @@ pub fn _cleanup_assemble(allocator: std.mem.Allocator, result: *AssembleResult) 
     allocator.free(result.characters[0..result.length]);
     allocator.free(result.codepoint_lengths[0..result.length]);
 }
-const chosungs: [19]u21 = .{
-    'ㄱ',
-    'ㄲ',
-    'ㄴ',
-    'ㄷ',
-    'ㄸ',
-    'ㄹ',
-    'ㅁ',
-    'ㅂ',
-    'ㅃ',
-    'ㅅ',
-    'ㅆ',
-    'ㅇ',
-    'ㅈ',
-    'ㅉ',
-    'ㅊ',
-    'ㅋ',
-    'ㅌ',
-    'ㅍ',
-    'ㅎ',
-};
-const joongsungs: [21]u21 = .{
-    'ㅏ',
-    'ㅐ',
-    'ㅑ',
-    'ㅒ',
-    'ㅓ',
-    'ㅔ',
-    'ㅕ',
-    'ㅖ',
-    'ㅗ',
-    'ㅘ',
-    'ㅙ',
-    'ㅚ',
-    'ㅛ',
-    'ㅜ',
-    'ㅝ',
-    'ㅞ',
-    'ㅟ',
-    'ㅠ',
-    'ㅡ',
-    'ㅢ',
-    'ㅣ',
-};
-
-const jongsungs: [28]u21 = .{
-    'N',
-    'ㄱ',
-    'ㄲ',
-    'ㄳ',
-    'ㄴ',
-    'ㄵ',
-    'ㄶ',
-    'ㄷ',
-    'ㄹ',
-    'ㄺ',
-    'ㄻ',
-    'ㄼ',
-    'ㄽ',
-    'ㄾ',
-    'ㄿ',
-    'ㅀ',
-    'ㅁ',
-    'ㅂ',
-    'ㅄ',
-    'ㅅ',
-    'ㅆ',
-    'ㅇ',
-    'ㅈ',
-    'ㅊ',
-    'ㅋ',
-    'ㅌ',
-    'ㅍ',
-    'ㅎ',
-};
 
 fn collect_disassembled(allocator: std.mem.Allocator, is_hanguls: *std.ArrayList(bool), jamos: *std.ArrayList([*]u8), codepoint_lengths: *std.ArrayList(u3), positions: *std.ArrayList(SyllablePosition), is_hangul: bool, codepoint: u21, position: SyllablePosition) void {
     const u8_len = std.unicode.utf8CodepointSequenceLength(codepoint) catch unreachable;
@@ -221,6 +226,9 @@ export fn disassemble(codepoints: [*:0]const u8) *DisassembleResult {
     return _disassemble(std.heap.page_allocator, codepoints);
 }
 
+export fn assemble(codepoints: [*:0]const u8) *AssembleResult {
+    return _assemble(std.heap.page_allocator, codepoints);
+}
 pub fn _disassemble(allocator: std.mem.Allocator, codepoints: [*:0]const u8) *DisassembleResult {
     var unicode_codepoints = (std.unicode.Utf8View.init(std.mem.span(codepoints)) catch unreachable).iterator();
 
@@ -347,33 +355,27 @@ fn flush_assembled(allocator: std.mem.Allocator, characters: *std.ArrayList([*]u
     var u8_len: u3 = undefined;
     var encoded: []u8 = undefined;
 
-    std.log.warn("{}", .{collected_count});
     if (collected_count.* >= 1) {
         const onset = collected[0];
         if (OnsetIndex.get(onset)) |onset_index| {
-            std.log.warn("Onset {s}, {d}", .{ onset, onset_index });
             codepoint += onset_index * 21 * 28;
 
             if (collected_count.* >= 2) {
                 const nucleus = collected[1];
                 const nucleus_index = NucleusIndex.get(nucleus) orelse unreachable;
-                std.log.warn("Nucleus {s}, {d}", .{ nucleus, nucleus_index });
                 codepoint += nucleus_index * 28;
             }
             if (collected_count.* >= 3) {
                 const coda = collected[2];
                 const coda_index = CodaIndex.get(coda) orelse unreachable;
-                std.log.warn("Coda {s}, {d}", .{ coda, coda_index });
                 codepoint += coda_index;
             }
-
-            u8_len = std.unicode.utf8CodepointSequenceLength(codepoint) catch unreachable;
-            encoded = allocator.alloc(u8, u8_len) catch unreachable;
-            _ = std.unicode.utf8Encode(codepoint, encoded) catch unreachable;
         } else {
-            encoded = collected[0];
-            u8_len = 1;
+            codepoint = std.unicode.utf8Decode(collected[0]) catch unreachable;
         }
+        u8_len = std.unicode.utf8CodepointSequenceLength(codepoint) catch unreachable;
+        encoded = allocator.alloc(u8, u8_len) catch unreachable;
+        _ = std.unicode.utf8Encode(codepoint, encoded) catch unreachable;
 
         collected_count.* = 0;
         characters.append(encoded.ptr) catch unreachable;
@@ -437,5 +439,5 @@ test "testing assemble with whitespace" {
         const character = result.characters[index][0..utf8_size];
         std.debug.print("Element {}: {s}\n", .{ index, character });
     }
-    //_cleanup_assemble(allocator, result);
+    _cleanup_assemble(allocator, result);
 }
