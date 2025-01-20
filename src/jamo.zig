@@ -2,20 +2,22 @@ const std = @import("std");
 
 const SyllablePosition = enum(u8) { CODA, NUCLEUS, ONSET, NOT_APPLICABLE };
 
-const DisassembleResult = extern struct {
-    length: usize,
-    original_string: [*:0]u8,
+const DisassembleResult = struct {
+    input: [*]const u8,
+    input_byte_count: usize,
     is_hanguls: [*]bool,
-    jamos: [*][*]u8,
-    codepoint_lengths: [*]u3,
+    jamos: [*]const u8,
+    jamos_count: usize,
+    jamos_byte_count: usize,
     positions: [*]SyllablePosition,
 };
 
-const AssembleResult = extern struct {
-    length: usize,
-    original_string: [*:0]u8,
-    characters: [*][*]u8,
-    codepoint_lengths: [*]u3,
+const AssembleResult = struct {
+    input: [*]const u8,
+    input_byte_count: usize,
+    characters: [*]const u8,
+    characters_count: usize,
+    characters_byte_count: usize,
 };
 
 const AssembleState = enum(u2) { INIT, ONSET, ONSET_NUCLEUS };
@@ -182,38 +184,13 @@ export fn cleanup_assemble(result: *AssembleResult) void {
 }
 
 pub fn _cleanup_disassemble(allocator: std.mem.Allocator, result: *DisassembleResult) void {
-    allocator.free(result.is_hanguls[0..result.length]);
-    const jamos = result.jamos[0..result.length];
-    for (0..result.length) |i| {
-        const length = result.codepoint_lengths[i];
-        const codepoints: []u8 = jamos[i][0..length];
-        allocator.free(codepoints);
-    }
-    allocator.free(result.jamos[0..result.length]);
-    allocator.free(result.codepoint_lengths[0..result.length]);
-    allocator.free(result.positions[0..result.length]);
+    allocator.free(result.is_hanguls[0..result.jamos_count]);
+    allocator.free(result.jamos[0..result.jamos_byte_count]);
+    allocator.free(result.positions[0..result.jamos_count]);
 }
 
 pub fn _cleanup_assemble(allocator: std.mem.Allocator, result: *AssembleResult) void {
-    const characters = result.characters[0..result.length];
-    for (0..result.length) |i| {
-        const length = result.codepoint_lengths[i];
-        const codepoints: []u8 = characters[i][0..length];
-        allocator.free(codepoints);
-    }
-    allocator.free(result.characters[0..result.length]);
-    allocator.free(result.codepoint_lengths[0..result.length]);
-}
-
-fn collect_disassembled(allocator: std.mem.Allocator, is_hanguls: *std.ArrayList(bool), jamos: *std.ArrayList([*]u8), codepoint_lengths: *std.ArrayList(u3), positions: *std.ArrayList(SyllablePosition), is_hangul: bool, codepoint: u21, position: SyllablePosition) void {
-    const u8_len = std.unicode.utf8CodepointSequenceLength(codepoint) catch unreachable;
-    const encoded = allocator.alloc(u8, u8_len) catch unreachable;
-    _ = std.unicode.utf8Encode(codepoint, encoded) catch unreachable;
-
-    is_hanguls.append(is_hangul) catch unreachable;
-    jamos.append(encoded.ptr) catch unreachable;
-    codepoint_lengths.append(u8_len) catch unreachable;
-    positions.append(position) catch unreachable;
+    allocator.free(result.characters[0..result.characters_byte_count]);
 }
 
 export fn allocUint8(length: u32) [*]const u8 {
@@ -222,26 +199,34 @@ export fn allocUint8(length: u32) [*]const u8 {
     return slice.ptr;
 }
 
-export fn disassemble(codepoints: [*:0]const u8) *DisassembleResult {
-    return _disassemble(std.heap.page_allocator, codepoints);
+pub export fn disassemble(input: [*]const u8, length: usize, return_whitespace: bool) *const DisassembleResult {
+    // https://ziggit.dev/t/convert-const-u8-to-0-const-u8/3375/2
+    // To convert from a zero terminated pointer to a slice use: std.mem.span .
+    // To convert from a 0 terminated sentinel slice to a zero terminated pointer call .ptr
+    // "Hello" is a zero terminated array of u8
+    // const hello: [:0]const u8 = "Hello";
+    // const ptr: [*:0]const u8 = hello.ptr;
+    // To convert from a non zero terminated slice to a zero terminated pointer use: std:mem.Allocator.dupeZ
+    return _disassemble(std.heap.page_allocator, input[0..length], return_whitespace);
 }
 
-export fn assemble(codepoints: [*:0]const u8) *AssembleResult {
-    return _assemble(std.heap.page_allocator, codepoints);
+pub export fn assemble(input: [*]const u8, length: usize) *const AssembleResult {
+    return _assemble(std.heap.page_allocator, input[0..length]);
 }
-pub fn _disassemble(allocator: std.mem.Allocator, codepoints: [*:0]const u8) *DisassembleResult {
-    var unicode_codepoints = (std.unicode.Utf8View.init(std.mem.span(codepoints)) catch unreachable).iterator();
+
+pub fn _disassemble(allocator: std.mem.Allocator, input: []const u8, return_whitespace: bool) *DisassembleResult {
+    var unicode_codepoints = (std.unicode.Utf8View.init(input) catch unreachable).iterator();
 
     const result = std.heap.page_allocator.create(DisassembleResult) catch unreachable;
-    result.original_string = @constCast(codepoints);
 
     var is_hanguls = std.ArrayList(bool).init(allocator);
-    var jamos = std.ArrayList([*]u8).init(allocator);
-    var codepoint_lengths = std.ArrayList(u3).init(allocator);
+    var jamos = std.ArrayList(u8).init(allocator);
     var positions = std.ArrayList(SyllablePosition).init(allocator);
 
-    while (unicode_codepoints.nextCodepoint()) |c| {
-        if (isWhitespace(c)) {
+    while (unicode_codepoints.nextCodepointSlice()) |slice| {
+        const c = std.unicode.utf8Decode(slice) catch unreachable;
+
+        if (!return_whitespace and isWhitespace(c)) {
             continue;
         }
 
@@ -250,35 +235,45 @@ pub fn _disassemble(allocator: std.mem.Allocator, codepoints: [*:0]const u8) *Di
             const joongsungCode = joongsungs[@divTrunc((c - 0xAC00) % (28 * 21), 28)];
             const jongsungCode = jongsungs[@mod(@mod(c - 0xAC00, (28 * 21)), 28)];
 
-            collect_disassembled(allocator, &is_hanguls, &jamos, &codepoint_lengths, &positions, true, chosungCode, SyllablePosition.ONSET);
-            collect_disassembled(allocator, &is_hanguls, &jamos, &codepoint_lengths, &positions, true, joongsungCode, SyllablePosition.NUCLEUS);
+            collect_disassembled(allocator, &is_hanguls, &jamos, &positions, true, chosungCode, SyllablePosition.ONSET);
+            collect_disassembled(allocator, &is_hanguls, &jamos, &positions, true, joongsungCode, SyllablePosition.NUCLEUS);
             if (jongsungCode != 'N') {
-                collect_disassembled(allocator, &is_hanguls, &jamos, &codepoint_lengths, &positions, true, jongsungCode, SyllablePosition.CODA);
+                collect_disassembled(allocator, &is_hanguls, &jamos, &positions, true, jongsungCode, SyllablePosition.CODA);
             }
         } else {
-            collect_disassembled(allocator, &is_hanguls, &jamos, &codepoint_lengths, &positions, false, c, SyllablePosition.NOT_APPLICABLE);
+            collect_disassembled(allocator, &is_hanguls, &jamos, &positions, false, c, SyllablePosition.NOT_APPLICABLE);
         }
     }
-    result.length = is_hanguls.items.len;
+    result.input = input.ptr;
+    result.input_byte_count = input.len;
+    result.jamos_count = is_hanguls.items.len;
+    result.jamos_byte_count = jamos.items.len;
     result.is_hanguls = (is_hanguls.toOwnedSlice() catch unreachable).ptr;
     result.jamos = (jamos.toOwnedSlice() catch unreachable).ptr;
-    result.codepoint_lengths = (codepoint_lengths.toOwnedSlice() catch unreachable).ptr;
     result.positions = (positions.toOwnedSlice() catch unreachable).ptr;
     return result;
 }
 
-pub fn _assemble(allocator: std.mem.Allocator, codepoints: [*:0]const u8) *AssembleResult {
-    var unicode_codepoints = (std.unicode.Utf8View.init(std.mem.span(codepoints)) catch unreachable).iterator();
+fn collect_disassembled(allocator: std.mem.Allocator, is_hanguls: *std.ArrayList(bool), jamos: *std.ArrayList(u8), positions: *std.ArrayList(SyllablePosition), is_hangul: bool, codepoint: u21, position: SyllablePosition) void {
+    const u8_len = std.unicode.utf8CodepointSequenceLength(codepoint) catch unreachable;
+    const encoded = allocator.alloc(u8, u8_len) catch unreachable;
+    defer allocator.free(encoded);
+    _ = std.unicode.utf8Encode(codepoint, encoded) catch unreachable;
+    is_hanguls.append(is_hangul) catch unreachable;
+    jamos.appendSlice(encoded) catch unreachable;
+    positions.append(position) catch unreachable;
+}
+
+pub fn _assemble(allocator: std.mem.Allocator, input: []const u8) *AssembleResult {
+    var unicode_codepoints = (std.unicode.Utf8View.init(input) catch unreachable).iterator();
 
     const result = std.heap.page_allocator.create(AssembleResult) catch unreachable;
-    result.original_string = @constCast(codepoints);
-    var characters = std.ArrayList([*]u8).init(allocator);
-    var codepoint_lengths = std.ArrayList(u3).init(allocator);
+    var characters = std.ArrayList(u8).init(allocator);
 
-    var length: usize = 0;
+    var characters_count: usize = 0;
     var state = AssembleState.INIT;
     var collected_count: u8 = 0;
-    var collected: [3][]u8 = undefined;
+    var collected: [3][]const u8 = undefined;
 
     while (unicode_codepoints.nextCodepointSlice()) |c| {
         const is_onset = isOnset(c);
@@ -294,28 +289,28 @@ pub fn _assemble(allocator: std.mem.Allocator, codepoints: [*:0]const u8) *Assem
                     collect_assembled(&collected, &collected_count, c);
                     state = AssembleState.ONSET;
                 } else {
-                    flush_assembled(allocator, &characters, &codepoint_lengths, &collected, &collected_count);
+                    flush_assembled(allocator, &characters, &collected, &collected_count);
                     collect_assembled(&collected, &collected_count, c);
-                    flush_assembled(allocator, &characters, &codepoint_lengths, &collected, &collected_count);
+                    flush_assembled(allocator, &characters, &collected, &collected_count);
                     state = AssembleState.INIT;
-                    length += 2;
+                    characters_count += 2;
                 }
             },
             AssembleState.ONSET => {
                 if (is_only_onset or is_onset_coda) {
-                    flush_assembled(allocator, &characters, &codepoint_lengths, &collected, &collected_count);
+                    flush_assembled(allocator, &characters, &collected, &collected_count);
                     collect_assembled(&collected, &collected_count, c);
                     state = AssembleState.ONSET;
-                    length += 1;
+                    characters_count += 1;
                 } else if (is_nucleus) {
                     collect_assembled(&collected, &collected_count, c);
                     state = AssembleState.ONSET_NUCLEUS;
                 } else {
-                    flush_assembled(allocator, &characters, &codepoint_lengths, &collected, &collected_count);
+                    flush_assembled(allocator, &characters, &collected, &collected_count);
                     collect_assembled(&collected, &collected_count, c);
-                    flush_assembled(allocator, &characters, &codepoint_lengths, &collected, &collected_count);
+                    flush_assembled(allocator, &characters, &collected, &collected_count);
                     state = AssembleState.INIT;
-                    length += 2;
+                    characters_count += 2;
                 }
             },
             AssembleState.ONSET_NUCLEUS => {
@@ -323,33 +318,35 @@ pub fn _assemble(allocator: std.mem.Allocator, codepoints: [*:0]const u8) *Assem
                 const next = unicode_codepoints.peek(1);
                 const start_anew = is_onset_coda and (next.len > 0 and isNucleus(next));
                 if (is_only_onset or start_anew) {
-                    flush_assembled(allocator, &characters, &codepoint_lengths, &collected, &collected_count);
+                    flush_assembled(allocator, &characters, &collected, &collected_count);
                     collect_assembled(&collected, &collected_count, c);
                     state = AssembleState.ONSET;
-                    length += 1;
+                    characters_count += 1;
                 } else if (is_only_coda or is_onset_coda) {
                     collect_assembled(&collected, &collected_count, c);
-                    flush_assembled(allocator, &characters, &codepoint_lengths, &collected, &collected_count);
+                    flush_assembled(allocator, &characters, &collected, &collected_count);
                     state = AssembleState.INIT;
-                    length += 1;
+                    characters_count += 1;
                 } else {
-                    flush_assembled(allocator, &characters, &codepoint_lengths, &collected, &collected_count);
+                    flush_assembled(allocator, &characters, &collected, &collected_count);
                     collect_assembled(&collected, &collected_count, c);
-                    flush_assembled(allocator, &characters, &codepoint_lengths, &collected, &collected_count);
+                    flush_assembled(allocator, &characters, &collected, &collected_count);
                     state = AssembleState.INIT;
-                    length += 2;
+                    characters_count += 2;
                 }
             },
         }
     }
 
+    result.input = input.ptr;
+    result.input_byte_count = input.len;
+    result.characters_byte_count = characters.items.len;
     result.characters = (characters.toOwnedSlice() catch unreachable).ptr;
-    result.codepoint_lengths = (codepoint_lengths.toOwnedSlice() catch unreachable).ptr;
-    result.length = length;
+    result.characters_count = characters_count;
     return result;
 }
 
-fn flush_assembled(allocator: std.mem.Allocator, characters: *std.ArrayList([*]u8), codepoint_lengths: *std.ArrayList(u3), collected: *[3][]u8, collected_count: *u8) void {
+fn flush_assembled(allocator: std.mem.Allocator, characters: *std.ArrayList(u8), collected: *[3][]const u8, collected_count: *u8) void {
     var codepoint: u21 = 0xAC00;
 
     var u8_len: u3 = undefined;
@@ -375,17 +372,16 @@ fn flush_assembled(allocator: std.mem.Allocator, characters: *std.ArrayList([*]u
         }
         u8_len = std.unicode.utf8CodepointSequenceLength(codepoint) catch unreachable;
         encoded = allocator.alloc(u8, u8_len) catch unreachable;
+        defer allocator.free(encoded);
         _ = std.unicode.utf8Encode(codepoint, encoded) catch unreachable;
 
         collected_count.* = 0;
-        characters.append(encoded.ptr) catch unreachable;
-        codepoint_lengths.append(u8_len) catch unreachable;
+        characters.appendSlice(encoded) catch unreachable;
     }
 }
 
-fn collect_assembled(collected: *[3][]u8, collected_count: *u8, character: []const u8) void {
-    //const char_array = @constCast(character);
-    collected[collected_count.*] = @constCast(character);
+fn collect_assembled(collected: *[3][]const u8, collected_count: *u8, character: []const u8) void {
+    collected[collected_count.*] = character;
     collected_count.* += 1;
 }
 
@@ -412,16 +408,15 @@ test "testing disassemble with whitespace" {
     std.debug.print("DisassembleResult in bytes: {}\n", .{@sizeOf(DisassembleResult)});
     const allocator = std.testing.allocator;
     const test_string = "주 4일제. We'll make it work.";
-    const result = _disassemble(allocator, test_string);
+    const result = _disassemble(allocator, test_string, true);
     inline for (std.meta.fields(@TypeOf(result.*))) |field| {
         std.debug.print("Byte offset in bytes of {s}: {}\n", .{ field.name, @offsetOf(DisassembleResult, field.name) });
     }
-    std.debug.print("Jamos len {}\n", .{result.length});
-    for (0..result.length) |index| {
-        const utf8_size = result.codepoint_lengths[index];
-        const jamo = result.jamos[index][0..utf8_size];
-        std.debug.print("Element {}: {s}\n", .{ index, jamo });
-    }
+    std.debug.print("Jamos len {}\n", .{result.jamos_count});
+    std.debug.print("Jamos input: {s}\n", .{result.input[0..result.input_byte_count]});
+    std.debug.print("Jamos: {s}\n", .{result.jamos[0..result.jamos_byte_count]});
+    std.debug.print("Jamos buffer size: {d}\n", .{result.jamos_byte_count});
+    std.debug.print("Jamos: {*}\n", .{result.is_hanguls[0..result.jamos_count]});
     _cleanup_disassemble(allocator, result);
 }
 
@@ -433,11 +428,9 @@ test "testing assemble with whitespace" {
     inline for (std.meta.fields(@TypeOf(result.*))) |field| {
         std.debug.print("Byte offset in bytes of {s}: {}\n", .{ field.name, @offsetOf(AssembleResult, field.name) });
     }
-    std.debug.print("Characters len {}\n", .{result.length});
-    for (0..result.length) |index| {
-        const utf8_size = result.codepoint_lengths[index];
-        const character = result.characters[index][0..utf8_size];
-        std.debug.print("Element {}: {s}\n", .{ index, character });
-    }
+    std.debug.print("Assemble input: {s}\n", .{result.input[0..result.input_byte_count]});
+    std.debug.print("Characters len {}\n", .{result.characters_count});
+    std.debug.print("Characters: {s}\n", .{result.characters[0..result.characters_byte_count]});
+    std.debug.print("Characters buffer size: {d}\n", .{result.characters_byte_count});
     _cleanup_assemble(allocator, result);
 }
