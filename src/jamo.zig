@@ -9,7 +9,7 @@ const DisassembleResult = struct {
     jamos: [*]const u8,
     jamos_count: usize,
     jamos_byte_count: usize,
-    positions: [*]SyllablePosition,
+    syllable_positions: [*]SyllablePosition,
 };
 
 const AssembleResult = struct {
@@ -173,7 +173,7 @@ const CodaIndex = std.StaticStringMap(u21).initComptime(.{
     .{ "ㅎ", 27 },
 });
 
-extern fn jslog(content: u64) void;
+extern fn jslog(content: usize) void;
 
 export fn cleanup_disassemble(result: *DisassembleResult) void {
     _cleanup_disassemble(std.heap.page_allocator, result);
@@ -186,7 +186,7 @@ export fn cleanup_assemble(result: *AssembleResult) void {
 pub fn _cleanup_disassemble(allocator: std.mem.Allocator, result: *DisassembleResult) void {
     allocator.free(result.is_hanguls[0..result.jamos_count]);
     allocator.free(result.jamos[0..result.jamos_byte_count]);
-    allocator.free(result.positions[0..result.jamos_count]);
+    allocator.free(result.syllable_positions[0..result.jamos_count]);
 }
 
 pub fn _cleanup_assemble(allocator: std.mem.Allocator, result: *AssembleResult) void {
@@ -250,7 +250,7 @@ pub fn _disassemble(allocator: std.mem.Allocator, input: []const u8, return_whit
     result.jamos_byte_count = jamos.items.len;
     result.is_hanguls = (is_hanguls.toOwnedSlice() catch unreachable).ptr;
     result.jamos = (jamos.toOwnedSlice() catch unreachable).ptr;
-    result.positions = (positions.toOwnedSlice() catch unreachable).ptr;
+    result.syllable_positions = (positions.toOwnedSlice() catch unreachable).ptr;
     return result;
 }
 

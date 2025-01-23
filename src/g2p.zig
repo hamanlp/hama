@@ -53,12 +53,17 @@ pub const G2PLexer = struct {
             if (next_slice.len == 0) {
                 break;
             }
+
             if (classifyCodepointSlice(next_slice) != token_type) {
                 break;
             }
 
             // Same type => consume and append
             _ = self.iterator.nextCodepointSlice();
+
+            if (self.iterator.i - begin_index > MAX_TOKEN_LENGTH) {
+                break;
+            }
         }
 
         // 5) Return a token that owns its code points in a fresh slice
