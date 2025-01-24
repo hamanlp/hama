@@ -1,4 +1,6 @@
-import { createRequire } from "module";
+import { HAMA_JAMO_WASM_BASE64 } from "./hama-jamo-wasm";
+import { base64Decode } from "./wasm-utils.ts";
+
 const DISASSEMBLE_INPUT_OFFSET: number = 0;
 const DISASSEMBLE_INPUT_BYTE_COUNT_OFFSET: number = 4;
 const DISASSEMBLE_IS_HANGULS_OFFSET: number = 8;
@@ -24,12 +26,12 @@ enum SyllablePosition {
 type DisassembleResult = {
   input: string;
   is_hanguls: boolean[];
-  text: string[];
+  text: string;
   syllable_positions: SyllablePosition[];
 };
 
 type AssembleResult = {
-  input: number;
+  input: string;
   text: string;
 };
 
@@ -64,27 +66,14 @@ class JamoParser {
 
   async load(): Promise<void> {
     try {
-      let wasmBuffer;
       let wasmModule;
-
-      const wasmURL = new URL(
-        "../../zig-out/bin/hama-jamo.wasm",
-        import.meta.url,
-      );
+      const wasmBuffer = base64Decode(HAMA_JAMO_WASM_BASE64);
       if (typeof window === "undefined") {
         // Node.js
-        const require = createRequire(import.meta.url);
-        const fs = require("fs");
-        wasmBuffer = fs.readFileSync(wasmURL);
         wasmModule = await WebAssembly.instantiate(wasmBuffer, importObject);
       } else {
         // Browser
-        const response = await fetch(wasmURL);
-        wasmBuffer = await response.arrayBuffer();
-        wasmModule = await WebAssembly.instantiateStreaming(
-          wasmBuffer,
-          importObject,
-        );
+        wasmModule = await WebAssembly.instantiate(wasmBuffer, importObject);
       }
       //const wasmModule = await WebAssembly.instantiateStreaming(wasmBuffer, importObject);
       this.wasmInstance = wasmModule.instance;
@@ -135,11 +124,12 @@ class JamoParser {
       pointer + DISASSEMBLE_IS_HANGULS_OFFSET,
       true,
     );
-    const is_hanguls = new Uint8Array(
+    const is_hanguls_raw = new Uint8Array(
       this.memory.buffer,
       is_hanguls_address,
       jamos_count,
     );
+    const is_hanguls = Array.from(is_hanguls_raw, (value) => Boolean(value));
 
     // Get jamos.
     const jamos_address = view.getUint32(
@@ -150,7 +140,7 @@ class JamoParser {
       pointer + DISASSEMBLE_JAMOS_BYTE_COUNT_OFFSET,
       true,
     );
-    const jamos_str = decodeString(
+    const jamos = decodeString(
       this.memory.buffer,
       jamos_address,
       jamos_byte_count,
@@ -160,18 +150,27 @@ class JamoParser {
       pointer + DISASSEMBLE_SYLLABLE_POSITIONS_OFFSET,
       true,
     );
-    const syllable_positions = new Uint8Array(
+    const syllable_positions_raw = new Uint8Array(
       this.memory.buffer,
       syllable_positions_address,
       jamos_count,
     );
+    const syllable_positions = Array.from(syllable_positions_raw, (value) => {
+      switch (value) {
+        case 0:
+          return SyllablePosition.CODA;
+        case 1:
+          return SyllablePosition.NUCLEUS;
+        case 2:
+          return SyllablePosition.ONSET;
+        case 3:
+          return SyllablePosition.NOT_APPLICABLE;
+        default:
+          throw new Error(`Invalid syllable position value: ${value}`);
+      }
+    });
 
     // Collect results.
-    const jamos = [];
-    // @TODO - do this whithout a loop.
-    for (let i = 0; i < jamos_count; i++) {
-      jamos.push(jamos_str[i]);
-    }
     const result = {
       input: input,
       text: jamos,
@@ -232,23 +231,22 @@ class JamoParser {
       throw new Error("WASM module is not instantiated");
     }
 
-    const func = this.wasmInstance.exports[funcName];
+    const func = this.wasmInstance.exports[funcName] as CallableFunction;
     if (typeof func !== "function") {
       throw new Error(`${funcName} is not a function in the WASM module`);
     }
     return func(...args);
   }
-  encodeString(string: string): Uint8Array {
-  if (this.loaded) {
-    const buffer = new TextEncoder().encode(string);
-    const pointer = this._allocUint8(buffer.length); // ask Zig to allocate memory
-    const slice = new Uint8Array(this.memory.buffer, pointer, buffer.length);
-    slice.set(buffer);
-    return [pointer, buffer.length];
+  encodeString(string: string): [number, number] {
+    if (this.loaded) {
+      const buffer = new TextEncoder().encode(string);
+      const pointer = this._allocUint8(buffer.length); // ask Zig to allocate memory
+      const slice = new Uint8Array(this.memory.buffer, pointer, buffer.length);
+      slice.set(buffer);
+      return [pointer, buffer.length];
+    }
+    return [null, 0];
   }
-  return [new Uint8Array([]), 0];
-}
-
 }
 
 export { JamoParser };

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { JamoParser } from '../src/jamo';
+import { JamoParser } from "../src/jamo";
 
 // Call the main function to execute the example
 test("initialize", async () => {
@@ -26,4 +26,3 @@ test("assemble", async () => {
   const pointer = parser.assemble(string);
   console.log(pointer);
 });
-

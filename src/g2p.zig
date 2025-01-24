@@ -3,6 +3,7 @@ const jamo = @import("jamo.zig");
 const llama2 = @import("llama2.zig");
 const g2p_tokenizer = @import("g2p_tokenizer.zig");
 const g2p_model = @import("g2p_model.zig");
+const allocUint8 = jamo.allocUint8;
 
 const MAX_TOKEN_LENGTH = 50;
 
@@ -135,8 +136,9 @@ pub const Phonemizer = struct {
 };
 
 pub export fn init_phonemizer() *Phonemizer {
-    var phonemizer = Phonemizer.init(std.heap.page_allocator);
-    return &phonemizer;
+    const phonemizer_ptr = std.heap.page_allocator.create(Phonemizer) catch unreachable;
+    phonemizer_ptr.* = Phonemizer.init(std.heap.page_allocator);
+    return phonemizer_ptr;
 }
 
 pub export fn to_ipa(phonemizer: *Phonemizer, text: [*]const u8, length: usize) *const G2PResult {
