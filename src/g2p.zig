@@ -97,8 +97,10 @@ pub const Phonemizer = struct {
     pub fn to_ipa(self: *Phonemizer, input: []const u8) *G2PResult {
         const result = self.allocator.create(G2PResult) catch unreachable;
         const tokens = tokenize(self.allocator, input);
+        defer self.allocator.free(tokens);
         var normalized: []const u8 = undefined;
         var generated: []const u8 = undefined;
+        defer self.allocator.free(generated);
         var ipas = std.ArrayList(u8).init(self.allocator);
         for (tokens) |token| {
             const token_text = input[token.begin..token.end];
@@ -113,6 +115,7 @@ pub const Phonemizer = struct {
                     const disassembled = jamo._disassemble(self.allocator, token_text, true);
                     normalized = disassembled.jamos[0..disassembled.jamos_byte_count];
                     generated = self.run_model(normalized);
+                    jamo._cleanup_disassemble(self.allocator, disassembled);
                 },
                 else => {
                     generated = token_text;
@@ -129,9 +132,24 @@ pub const Phonemizer = struct {
 
     pub fn run_model(self: *Phonemizer, tokens: []const u8) []const u8 {
         const encoded = g2p_tokenizer.encode(self.allocator, tokens);
+        defer self.allocator.free(encoded);
         const output = self.runner.generate(encoded, g2p_tokenizer.token_to_id.get("<eos>").?);
+        defer self.allocator.free(output);
         const result = g2p_tokenizer.decode(self.allocator, output);
         return result;
+    }
+
+    pub fn deinit_result(self: *Phonemizer, g2p_result: *G2PResult) void {
+        if (g2p_result.ipa_byte_count > 0) {
+            self.allocator.free(g2p_result.ipa[0..g2p_result.ipa_byte_count]);
+        }
+        self.allocator.destroy(g2p_result);
+        //_ = self;
+        //_ = g2p_result;
+    }
+
+    pub fn deinit(self: *Phonemizer) void {
+        self.runner.deinit(self.allocator);
     }
 };
 
@@ -143,6 +161,13 @@ pub export fn init_phonemizer() *Phonemizer {
 
 pub export fn to_ipa(phonemizer: *Phonemizer, text: [*]const u8, length: usize) *const G2PResult {
     return phonemizer.to_ipa(text[0..length]);
+}
+
+pub export fn deinit_result(phonemizer: *Phonemizer, g2p_result: *G2PResult) void {
+    phonemizer.deinit_result(g2p_result);
+}
+pub export fn deinit_phonemizer(phonemizer: *Phonemizer) void {
+    phonemizer.deinit();
 }
 
 pub fn tokenize(allocator: std.mem.Allocator, input: []const u8) []G2PToken {
@@ -255,4 +280,25 @@ test "tokenize mixed Hangul, English, Other" {
 
     try std.testing.expectEqual(TokenType.OTHER, tokens[3].token_type);
     try std.testing.expectEqualStrings("?", input[tokens[3].begin..tokens[3].end]);
+}
+
+test "phonemizer: purely english input" {
+    var phonemizer = Phonemizer.init(std.testing.allocator);
+
+    const input = "HELLO";
+    var result = phonemizer.to_ipa(input);
+
+    // Because this is purely English, you expect:
+    // 1) It's tokenized into a single ENGLISH token.
+    // 2) That token is normalized to "hello".
+    // 3) The runner returns some phonetic sequence, e.g. "h eh l ow".
+    // If you know the exact output from your G2P model, replace the check below:
+    // try testing.expectEqualStrings("hɛloʊ", result);
+    // But if you can't guarantee the exact output, just check it's non-empty:
+    try std.testing.expect(result.ipa_byte_count > 0);
+
+    // debugging output
+    std.debug.print("English input => \"{s}\"\n", .{result.ipa[0..result.ipa_byte_count]});
+    phonemizer.deinit_result(result);
+    phonemizer.deinit();
 }

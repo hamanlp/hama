@@ -1,6 +1,11 @@
 import { HAMA_G2P_WASM_BASE64 } from "./hama-g2p-wasm";
 import { base64Decode } from "./wasm-utils.ts";
 
+const G2P_INPUT_OFFSET = 0;
+const G2P_INPUT_BYTE_COUNT_OFFSET = 4;
+const G2P_IPA_OFFSET = 8;
+const G2P_IPA_BYTE_COUNT_OFFSET = 12;
+
 const decodeString = (buffer, pointer, length) => {
   const slice = new Uint8Array(buffer, pointer, length);
   return new TextDecoder().decode(slice);
@@ -21,6 +26,8 @@ class Phonemizer {
   private _init_phonemizer: CallableFunction | null = null;
   private _to_ipa: CallableFunction | null = null;
   private _allocUint8: CallableFunction | null = null;
+  private _deinit_result: CallableFunction | null = null;
+  private _deinit_phonemizer: CallableFunction | null = null;
   private loaded: Boolean = false;
 
   constructor() {
@@ -44,6 +51,8 @@ class Phonemizer {
         .init_phonemizer as CallableFunction;
       this._to_ipa = this.wasmInstance.exports.to_ipa as CallableFunction;
       this._allocUint8 = this.wasmInstance.exports.allocUint8 as CallableFunction;
+      this._deinit_result = this.wasmInstance.exports.deinit_result as CallableFunction;
+      this._deinit_phonemizer = this.wasmInstance.exports.deinit_phonemizer as CallableFunction;
       this.memory = this.wasmInstance.exports.memory as WebAssembly.Memory;
       this.loaded = true;
       await this.init_phonemizer();
@@ -56,24 +65,54 @@ class Phonemizer {
     if (!this._init_phonemizer) {
       throw new Error("init_phonemizer function is not available");
     }
-    this.pointer = this._init_phonemizer();
+    this.phonemizer = this._init_phonemizer();
   }
 
   to_ipa(text: string): string {
-    const [encoded, encoded_byte_length] = this.encodeString(text);
-
     if (!this._to_ipa) {
       throw new Error("to_ipa function is not available");
     }
 
-    if (!this.pointer) {
+    if (!this.phonemizer) {
       throw new Error("phonemizer pointer is not available");
     }
-    console.log(this.pointer, encoded, encoded_byte_length);
-    console.log(this._to_ipa)
-    const pointer = this._to_ipa(this.pointer, encoded, encoded_byte_length);
-    return "good";
+
+    const [encoded, encoded_byte_length] = this.encodeString(text);
+
+    const pointer = this._to_ipa(this.phonemizer, encoded, encoded_byte_length);
+    const view = new DataView(this.memory.buffer);
+
+    // Get original string.
+    const input_address = view.getUint32(pointer+G2P_INPUT_OFFSET, true);
+    const input_byte_count = view.getUint32(
+      pointer + G2P_INPUT_BYTE_COUNT_OFFSET,
+      true,
+    );
+    const input = decodeString(
+      this.memory.buffer,
+      input_address,
+      input_byte_count,
+    );
+
+    // Get ipa string.
+    const ipa_address = view.getUint32(pointer+G2P_IPA_OFFSET, true);
+    const ipa_byte_count = view.getUint32(
+      pointer + G2P_IPA_BYTE_COUNT_OFFSET,
+      true,
+    );
+    const ipa = decodeString(
+      this.memory.buffer,
+      ipa_address,
+      ipa_byte_count,
+    );
+    this._deinit_result(this.phonemizer, pointer);
+    return ipa;
   }
+
+  deinit(): void {
+    this._deinit_phonemizer(this.phonemizer);
+  }
+
 
   encodeString(string: string): [number, number] {
     if (this.loaded) {
@@ -85,6 +124,7 @@ class Phonemizer {
     }
     return [null, 0];
   }
+
 
 }
 

@@ -1,0 +1,10 @@
+[project]
+name = "hama"
+version = "1.1.0"
+dependencies = [
+  "wasmer == 1.1.0",
+]
+requires-python = ">=3.6"
+description = "Client-side NLP for Korean and English"
+readme = "README.md"
+license = "Apache-2.0"

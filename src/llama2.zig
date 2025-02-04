@@ -671,6 +671,10 @@ pub const Llama2Runner = struct {
         return Llama2Runner{ .allocator = allocator, .config = config, .state = state, .weights = weights };
     }
 
+    pub fn deinit(self: *Llama2Runner, allocator: std.mem.Allocator) void {
+        self.state.deinit(allocator);
+    }
+
     pub fn generate(self: *Llama2Runner, input: []usize, eos_token_id: usize) []const usize {
         const temperature = 1.0;
         const top_p = 0.9;
