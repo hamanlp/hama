@@ -1,6 +1,6 @@
 {
-  "name": "hama",
-  "version": "1.0.1",
+  "name": "hama-js",
+  "version": "1.1.0",
   "description": "Modern text analysis in Kilobytes",
   "type": "module",
   "source": "src/index.ts",
