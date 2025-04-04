@@ -11,6 +11,7 @@ authors = [
 ]
 dependencies = [
   "wasmer == 1.1.0",
+  "wasmer-compiler-cranelift == 1.1.0",
 ]
 requires-python = ">=3.6"
 readme = "README.md"
@@ -29,6 +30,9 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+'hama' = ['**/*.json']
+
 [tool.tox]
 requires = ["tox>=4.19", "tox-docker"]
 envlist = ["py36", "py37", "py38", "py39", "py310", "py311", "py312", "py313"]
@@ -38,3 +42,27 @@ deps = ["pytest"]
 description = "Run test under {base_python}"
 allowlist_externals = ["pytest"]
 commands = [["pytest"]]
+
+[tool.tox.docker.py36]
+image = "python:3.6"
+
+[tool.tox.docker.py37]
+image = "python:3.7"
+
+[tool.tox.docker.py38]
+image = "python:3.8"
+
+[tool.tox.docker.py39]
+image = "python:3.9"
+
+[tool.tox.docker.py310]
+image = "python:3.10"
+
+[tool.tox.docker.py311]
+image = "python:3.11"
+
+[tool.tox.docker.py312]
+image = "python:3.12"
+
+[tool.tox.docker.py313]
+image = "python:3.13"
