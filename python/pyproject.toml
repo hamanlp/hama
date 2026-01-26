@@ -1,68 +1,29 @@
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "hama"
-version = "1.1.0"
-description = "Client-side NLP for Korean and English"
+version = "0.1.0"
+description = "Cross-platform grapheme-to-phoneme inference library powered by ONNX."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
 authors = [
-  { name = "Seongmin Park", email = "llov0708@gmail.com" }
+  {name = "hama contributors"}
 ]
 dependencies = [
-  "wasmer == 1.1.0",
-  "wasmer-compiler-cranelift == 1.1.0",
+  "numpy>=1.24",
+  "onnxruntime>=1.17",
 ]
-requires-python = ">=3.6"
-readme = "README.md"
-license = { text = "Apache-2.0" }
+
+[project.urls]
+Homepage = "https://github.com/hamanlp/hama"
 
 [project.optional-dependencies]
-dev = [
-  "tox",
-  "pytest",    # for running tests
-  "tox-docker"
+test = [
+  "pytest>=7.4",
 ]
 
-[tool.setuptools]
-package-dir = { "" = "src" }
+[tool.uv]
+package = true
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-'hama' = ['**/*.json']
-
-[tool.tox]
-requires = ["tox>=4.19", "tox-docker"]
-envlist = ["py36", "py37", "py38", "py39", "py310", "py311", "py312", "py313"]
-deps = ["pytest"]
-
-[tool.tox.env_run_base]
-description = "Run test under {base_python}"
-allowlist_externals = ["pytest"]
-commands = [["pytest"]]
-
-[tool.tox.docker.py36]
-image = "python:3.6"
-
-[tool.tox.docker.py37]
-image = "python:3.7"
-
-[tool.tox.docker.py38]
-image = "python:3.8"
-
-[tool.tox.docker.py39]
-image = "python:3.9"
-
-[tool.tox.docker.py310]
-image = "python:3.10"
-
-[tool.tox.docker.py311]
-image = "python:3.11"
-
-[tool.tox.docker.py312]
-image = "python:3.12"
-
-[tool.tox.docker.py313]
-image = "python:3.13"
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]

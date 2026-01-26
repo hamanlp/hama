@@ -1,9 +1,91 @@
-# hama
+# hama – cross-platform G2P inference
 
-This monorepo contains the following:
-- Zig engine for hama
-- Python glue and packaging
-- Javascript glue and packaging
+This repository packages the latest hama grapheme-to-phoneme (G2P) model for
+pure inference scenarios. It ships:
 
+- a Python package built with `uv`, powered by ONNX Runtime
+- a Bun/TypeScript package that runs under Node.js/Bun and the browser
+- shared tokenizer + Hangul jamo helpers
+- reproducible tests for both runtimes
 
-Working on docs right this moment
+The training stack continues to live in [`hama-training`](../hama-training); this
+repo focuses purely on runtime ergonomics.
+
+## Assets
+
+`assets/` contains the frozen `g2p_fp16.onnx` graph plus the decoder/encoder vocab.
+Each subpackage embeds a copy so it can work out-of-the-box.
+
+## Python package (`python/`)
+
+Requirements: `uv>=0.3`, Python 3.9+.
+
+```bash
+cd python
+uv sync --extra test
+uv run pytest
+uv run python - <<'PY'
+from hama import G2PModel
+model = G2PModel()
+print(model("안녕하세요").ipa)
+PY
+```
+
+The public API lives in `hama.__init__`:
+
+- `split_text_to_jamo` / `join_jamo_tokens` – reversible Hangul disassembly
+- `G2PModel.predict(text)` – returns IPA string plus `phoneme -> char_index`
+  alignments derived from attention weights
+
+Pass `model_path` / `vocab_path` to `G2PModel` to point at custom checkpoints
+and call `predict` repeatedly (the ONNX session is cached).
+
+## TypeScript + Bun (`ts/`)
+
+Requirements: `bun>=1.1`.
+
+```bash
+cd ts
+bun install
+bun run build
+bun test
+
+# Node/Bun usage
+node -e "const {G2PNodeModel}=require('./dist/node/index.js');(async()=>{const m=await G2PNodeModel.create();console.log(await m.predict('hello'));})();"
+```
+
+API overview:
+
+- `G2PNodeModel.create({ modelPath?, maxInputLen?, maxOutputLen? })`
+- `model.predict(text)` → `{ ipa, alignments }`
+- Browser bundle: `import { G2PBrowserModel } from "@hama/g2p/browser";`
+  (loads `onnxruntime-web` and fetches the embedded ONNX file)
+
+The package already copies `assets/g2p_fp16.onnx` + `g2p_vocab.json` into the `dist`
+folder so Node/Bun resolves them via `import.meta.url`. For browser deployments,
+ensure the assets are hosted next to the bundle (the default URL resolves
+relative to the built module).
+
+## Shared design notes
+
+- Both runtimes use identical Hangul jamo logic so character indices map back to
+  the original graphemes, even after jamo expansion.
+- Input length defaults to 128 time steps to accommodate Korean + mixed tokens.
+- Output alignment is derived from attention argmax, mirroring the training
+  scripts.
+
+## Project layout
+
+```
+assets/                 # Shared ONNX + vocabulary
+python/src/hama/       # Python runtime
+python/tests/           # pytest suite
+ts/src/                 # TypeScript runtime (Node + browser)
+ts/tests/               # bun test suite
+```
+
+## Next steps
+
+- Publish `python/` via `uv publish` / PyPI, and `ts/` as `@hama/g2p`.
+- Integrate CI to run both `uv run pytest` and `bun test`.
+- Wire up docs/examples + simple CLI wrappers if needed.

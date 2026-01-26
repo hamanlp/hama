@@ -1,0 +1,48 @@
+{
+  "name": "@hama/g2p",
+  "version": "0.1.0",
+  "description": "ONNX-powered grapheme-to-phoneme inference for Node, Bun, and browsers.",
+  "type": "module",
+  "main": "dist/node/index.js",
+  "module": "dist/node/index.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/node/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./browser": {
+      "import": "./dist/browser/index.js",
+      "types": "./dist/types/browser.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "bun run build:node && bun run build:browser",
+    "build:node": "tsc -p tsconfig.node.json && cp -R src/assets dist/node/assets",
+    "build:browser": "tsc -p tsconfig.browser.json && cp -R src/assets dist/browser/assets",
+    "test": "bun test"
+  },
+  "files": [
+    "dist/",
+    "src/assets/g2p_fp16.onnx",
+    "src/assets/g2p_vocab.json"
+  ],
+  "keywords": [
+    "g2p",
+    "onnx",
+    "bun",
+    "onnxruntime"
+  ],
+  "author": "hama contributors",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "bun-types": "^1.3.3",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "onnxruntime-node": "^1.23.2",
+    "onnxruntime-web": "^1.23.2"
+  },
+  "packageManager": "bun@1.1.0"
+}

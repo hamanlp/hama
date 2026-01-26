@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist/browser",
+    "lib": ["DOM", "ES2021"]
+  },
+  "include": ["src/browser.ts", "src/jamo.ts", "src/tokenizer.ts"]
+}
