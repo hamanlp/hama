@@ -50,43 +50,32 @@ class G2PModel:
 
     def predict(self, text: str) -> G2PResult:
         encoding = self.tokenizer.encode(text)
-        decoder_inputs = np.full(
-            (self.max_output_len,),
-            self.vocab.decoder_token_to_id["<pad>"],
-            dtype=np.int64,
-        )
-        decoder_inputs[0] = self.vocab.sos_id
-
         inputs = {
             "input_ids": encoding.ids.reshape(1, -1),
             "input_lengths": np.array([encoding.length], dtype=np.int64),
-            "decoder_inputs": decoder_inputs.reshape(1, -1),
         }
-        logits, attention = self.session.run(None, inputs)
-        phonemes, alignments = self._decode(
-            logits[0],
-            attention[0],
-            encoding.position_map,
-        )
+        decoded_ids, attn_indices = self.session.run(None, inputs)
+        phonemes, alignments = self._decode(decoded_ids[0], attn_indices[0], encoding.position_map)
         return G2PResult(ipa="".join(phonemes), alignments=alignments)
 
     def _decode(
         self,
-        logits: np.ndarray,
-        attention: np.ndarray,
+        decoded_ids: np.ndarray,
+        attn_indices: np.ndarray,
         position_map: Sequence[int],
     ) -> tuple[List[str], List[G2PAlignment]]:
         phonemes: List[str] = []
         alignments: List[G2PAlignment] = []
-        decoder_ids = logits.argmax(axis=-1)
-        attn_positions = attention.argmax(axis=-1)
-        for idx, token_id in enumerate(decoder_ids):
+        for idx, raw_id in enumerate(decoded_ids):
+            token_id = int(raw_id)
             if token_id == self.vocab.eos_id:
                 break
-            if token_id == self.vocab.pad_id and idx > 0:
+            if token_id == self.vocab.pad_id:
+                continue
+            if token_id == self.vocab.sos_id and not phonemes:
                 continue
             phoneme = self.vocab.decoder[token_id]
-            src_pos = int(attn_positions[idx])
+            src_pos = int(attn_indices[idx]) if idx < len(attn_indices) else 0
             char_index = position_map[src_pos] if src_pos < len(position_map) else 0
             alignments.append(
                 G2PAlignment(

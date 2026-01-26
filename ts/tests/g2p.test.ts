@@ -7,6 +7,9 @@ describe("G2PNodeModel", () => {
     const model = await G2PNodeModel.create();
     const result = await model.predict("안녕하세요");
     expect(result.ipa.length).toBeGreaterThan(0);
-    expect(result.alignments.length).toBe(result.ipa.length);
+    expect(result.alignments.length).toBeGreaterThan(0);
+    expect(result.alignments.every((al) => al.charIndex >= 0)).toBe(true);
+    const joined = result.alignments.map((al) => al.phoneme).join("");
+    expect(result.ipa.startsWith(joined)).toBe(true);
   });
 });

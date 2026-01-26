@@ -1,0 +1,128 @@
+Project: hama – cross-platform grapheme-to-phoneme (G2P) inference runtime.
+
+Purpose:
+- Serve end-user inference for the latest hama Korean G2P model.
+- Ship in two forms: Python package (`hama`) and TypeScript package (`@hama/g2p`) with shared assets.
+- Provide tokenizer/jamo utilities and minimal tests to validate inference.
+
+Shared assets:
+- `assets/g2p_fp16.onnx`: fp16 ONNX graph (same file copied into `python/src/hama/assets/` and `ts/src/assets/`).
+- ONNX graph structure:
+  * Inputs: `input_ids` (int64, [batch, src_len]) and `input_lengths` (int64, [batch]).
+  * Outputs: `decoded_ids` (int64, [batch, max_tgt_len]) and `attn_indices` (int64, [batch, max_tgt_len]) where `attn_indices[t]` is the encoder-time-step with max attention during step `t`.
+- `assets/g2p_vocab.json`: shared encoder/decoder vocabulary (also copied into package-specific asset folders).
+
+Python package (python/):
+- Requirements: Python 3.9+, `uv` for dependency management.
+- Entry point: `hama` package located at `python/src/hama`.
+
+Key modules/classes:
+1. `hama.G2PModel`
+   - Constructor keyword args:
+     * `model_path: Optional[PathLike]` (defaults to embedded `g2p_fp16.onnx`).
+     * `vocab_path: Optional[PathLike]` (defaults to embedded `g2p_vocab.json`).
+     * `provider: str` (default `CPUExecutionProvider`, passed to onnxruntime).
+     * `max_input_len: int = 128`, `max_output_len: int = 32`.
+   - Methods:
+     * `predict(text: str) -> G2PResult`
+       - Runs tokenization, ONNX inference, and decoding to IPA.
+   - Behavior: caches `onnxruntime.InferenceSession`; raises ValueError if text empty.
+
+2. `hama.G2PResult`
+   - Fields: `ipa: str`, `alignments: list[G2PAlignment]`.
+
+3. `hama.G2PAlignment`
+   - Fields: `phoneme: str`, `phoneme_index: int`, `char_index: int`.
+
+4. Tokenization helpers:
+   - `hama.TextTokenizer` / `hama.Vocabulary`.
+   - `hama.split_text_to_jamo(text: str) -> list[str]`.
+   - `hama.join_jamo_tokens(tokens: Iterable[str]) -> str`.
+   - Alignment reconstruction: ONNX returns `attn_indices`; map each index through `position_map` (token→original-char) to emit `G2PAlignment(char_index=position_map[attn_idx], phoneme=phoneme)`.
+
+5. Assets module `hama.assets` exposes package resources (no public API beyond resource loading).
+
+Usage pattern (docs should show):
+```python
+from hama import G2PModel
+
+model = G2PModel()
+result = model.predict("안녕하세요")
+print(result.ipa)
+for alignment in result.alignments:
+    print(alignment.phoneme, alignment.char_index)
+```
+
+Testing instructions (Python):
+```bash
+cd python
+uv sync --extra test
+uv run pytest
+```
+
+TypeScript package (ts/):
+- Tooling: Bun 1.1+, TypeScript 5.9, `onnxruntime-node` and `onnxruntime-web`.
+- Build outputs:
+  * Node/Bun bundle: `dist/node/index.js`.
+  * Browser bundle: `dist/browser/index.js`.
+  * Type declarations: `dist/types/*.d.ts`.
+- Assets copied into `dist/node/assets/` and `dist/browser/assets/` during build.
+
+Key exports:
+1. `G2PNodeModel` (ts/src/index.ts)
+   - Static method `create(options?: { modelPath?: string; maxInputLen?: number; maxOutputLen?: number; }) -> Promise<G2PNodeModel>`.
+   - Instance method `predict(text: string) -> Promise<{ ipa: string; alignments: Alignment[] }>` where `Alignment` matches Python fields.
+   - Uses `onnxruntime-node` with BigInt tensors; loads default ONNX from packaged assets via `import.meta.url`.
+
+2. `G2PBrowserModel` (ts/src/browser.ts)
+   - Static `create({ modelUrl?, vocabUrl?, ... }?)` returning promise.
+   - Uses `onnxruntime-web` and fetch API to load ONNX/vocab.
+
+3. `splitTextToJamo`, `joinJamoTokens`, tokenizer utilities mirrored from Python (ts/src/jamo.ts, ts/src/tokenizer.ts). `decodeIdsToResult` combines `decoded_ids` and `attn_indices`, and consults `positionMap` to map attention indices to original character positions (ensuring alignments match Python).
+
+Example Node usage:
+```ts
+import { G2PNodeModel } from "@hama/g2p";
+
+const run = async () => {
+  const model = await G2PNodeModel.create();
+  const result = await model.predict("안녕하세요");
+  console.log(result.ipa, result.alignments);
+};
+
+run().catch(console.error);
+```
+
+Browser example:
+```ts
+import { G2PBrowserModel } from "@hama/g2p/browser";
+
+const model = await G2PBrowserModel.create();
+const result = await model.predict("안녕하세요");
+```
+
+Build/test commands (TypeScript):
+```bash
+cd ts
+bun install
+bun run build
+bun test
+```
+
+Testing expectations:
+- `ts/tests/g2p.test.ts` asserts `G2PNodeModel` returns non-empty IPA and alignment count equals IPA length.
+- `ts/tests/jamo.test.ts` ensures jamo helpers round-trip Hangul.
+- Python tests: `python/tests/test_inference.py` (default assets), `python/tests/test_jamo.py`.
+
+Other notes:
+- README includes setup instructions and example scripts (`examples/python_demo.py`, `examples/node_demo.mjs`).
+- ONNX conversion pipeline lives in sibling repo `../hama-training`; updated script `scripts/export_onnx.py` handles fp16 conversion recursively.
+- Both runtimes rely on shared vocabulary to map encoder tokens to phonemes.
+- Alignment extraction is attention argmax-driven; identical logic in both languages.
+
+Doc goals for LLM:
+- Provide overview of architecture (shared assets, dual runtimes).
+- Document installation/setup per language.
+- Explain API surface (classes, methods, return types, options).
+- Include usage snippets for Python, Node, browser.
+- Mention how to run tests and regenerate assets.

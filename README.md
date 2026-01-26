@@ -24,11 +24,29 @@ Requirements: `uv>=0.3`, Python 3.9+.
 cd python
 uv sync --extra test
 uv run pytest
-uv run python - <<'PY'
+```
+
+Quick demo script (`examples/python_demo.py`):
+
+```python
 from hama import G2PModel
-model = G2PModel()
-print(model("안녕하세요").ipa)
-PY
+
+
+def main() -> None:
+    model = G2PModel()
+    result = model.predict("안녕하세요")
+    print("IPA:", result.ipa)
+    print("Alignments:", result.alignments)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Run it with:
+
+```bash
+uv run python examples/python_demo.py
 ```
 
 The public API lives in `hama.__init__`:
@@ -49,9 +67,30 @@ cd ts
 bun install
 bun run build
 bun test
+```
 
-# Node/Bun usage
-node -e "const {G2PNodeModel}=require('./dist/node/index.js');(async()=>{const m=await G2PNodeModel.create();console.log(await m.predict('hello'));})();"
+Node/Bun demo (`examples/node_demo.mjs`):
+
+```js
+import { G2PNodeModel } from "./dist/node/index.js";
+
+const run = async () => {
+    const model = await G2PNodeModel.create();
+    const result = await model.predict("안녕하세요");
+    console.log("IPA:", result.ipa);
+    console.log("Alignments:", result.alignments);
+};
+
+run().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});
+```
+
+Execute it after building:
+
+```bash
+node examples/node_demo.mjs
 ```
 
 API overview:
