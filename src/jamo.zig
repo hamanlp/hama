@@ -219,9 +219,9 @@ pub fn _disassemble(allocator: std.mem.Allocator, input: []const u8, return_whit
 
     const result = std.heap.page_allocator.create(DisassembleResult) catch unreachable;
 
-    var is_hanguls = std.ArrayList(bool).init(allocator);
-    var jamos = std.ArrayList(u8).init(allocator);
-    var positions = std.ArrayList(SyllablePosition).init(allocator);
+    var is_hanguls = std.ArrayList(bool){};
+    var jamos = std.ArrayList(u8){};
+    var positions = std.ArrayList(SyllablePosition){};
 
     while (unicode_codepoints.nextCodepointSlice()) |slice| {
         const c = std.unicode.utf8Decode(slice) catch unreachable;
@@ -246,11 +246,14 @@ pub fn _disassemble(allocator: std.mem.Allocator, input: []const u8, return_whit
     }
     result.input = input.ptr;
     result.input_byte_count = input.len;
-    result.jamos_count = is_hanguls.items.len;
-    result.jamos_byte_count = jamos.items.len;
-    result.is_hanguls = (is_hanguls.toOwnedSlice() catch unreachable).ptr;
-    result.jamos = (jamos.toOwnedSlice() catch unreachable).ptr;
-    result.syllable_positions = (positions.toOwnedSlice() catch unreachable).ptr;
+    const is_hanguls_slice = is_hanguls.toOwnedSlice(allocator) catch unreachable;
+    const jamos_slice = jamos.toOwnedSlice(allocator) catch unreachable;
+    const positions_slice = positions.toOwnedSlice(allocator) catch unreachable;
+    result.jamos_count = is_hanguls_slice.len;
+    result.jamos_byte_count = jamos_slice.len;
+    result.is_hanguls = is_hanguls_slice.ptr;
+    result.jamos = jamos_slice.ptr;
+    result.syllable_positions = positions_slice.ptr;
     return result;
 }
 
@@ -259,16 +262,16 @@ fn collect_disassembled(allocator: std.mem.Allocator, is_hanguls: *std.ArrayList
     const encoded = allocator.alloc(u8, u8_len) catch unreachable;
     defer allocator.free(encoded);
     _ = std.unicode.utf8Encode(codepoint, encoded) catch unreachable;
-    is_hanguls.append(is_hangul) catch unreachable;
-    jamos.appendSlice(encoded) catch unreachable;
-    positions.append(position) catch unreachable;
+    is_hanguls.append(allocator, is_hangul) catch unreachable;
+    jamos.appendSlice(allocator, encoded) catch unreachable;
+    positions.append(allocator, position) catch unreachable;
 }
 
 pub fn _assemble(allocator: std.mem.Allocator, input: []const u8) *AssembleResult {
     var unicode_codepoints = (std.unicode.Utf8View.init(input) catch unreachable).iterator();
 
     const result = std.heap.page_allocator.create(AssembleResult) catch unreachable;
-    var characters = std.ArrayList(u8).init(allocator);
+    var characters = std.ArrayList(u8){};
 
     var characters_count: usize = 0;
     var state = AssembleState.INIT;
@@ -340,8 +343,9 @@ pub fn _assemble(allocator: std.mem.Allocator, input: []const u8) *AssembleResul
 
     result.input = input.ptr;
     result.input_byte_count = input.len;
-    result.characters_byte_count = characters.items.len;
-    result.characters = (characters.toOwnedSlice() catch unreachable).ptr;
+    const characters_slice = characters.toOwnedSlice(allocator) catch unreachable;
+    result.characters_byte_count = characters_slice.len;
+    result.characters = characters_slice.ptr;
     result.characters_count = characters_count;
     return result;
 }
@@ -376,7 +380,7 @@ fn flush_assembled(allocator: std.mem.Allocator, characters: *std.ArrayList(u8),
         _ = std.unicode.utf8Encode(codepoint, encoded) catch unreachable;
 
         collected_count.* = 0;
-        characters.appendSlice(encoded) catch unreachable;
+        characters.appendSlice(allocator, encoded) catch unreachable;
     }
 }
 

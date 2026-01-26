@@ -288,26 +288,26 @@ pub fn encode(allocator: std.mem.Allocator, text: []const u8) []usize {
     const utf8_view = std.unicode.Utf8View.init(text) catch unreachable;
     var iterator = utf8_view.iterator();
 
-    var encoded = std.ArrayList(usize).init(allocator);
+    var encoded = std.ArrayList(usize){};
 
-    while (iterator.nextCodepointSlice()) |slice| encoded.append(token_to_id.get(slice).?) catch unreachable;
-    encoded.append(token_to_id.get("<sos>").?) catch unreachable;
+    while (iterator.nextCodepointSlice()) |slice| encoded.append(allocator, token_to_id.get(slice).?) catch unreachable;
+    encoded.append(allocator, token_to_id.get("<sos>").?) catch unreachable;
 
-    return encoded.toOwnedSlice() catch unreachable;
+    return encoded.toOwnedSlice(allocator) catch unreachable;
 }
 
 pub fn decode(allocator: std.mem.Allocator, token_ids: []const usize) []const u8 {
-    var decoded = std.ArrayList(u8).init(allocator);
+    var decoded = std.ArrayList(u8){};
 
     for (token_ids) |token_id| {
         // Skip special tokens.
         if (token_id <= 3) {
             continue;
         }
-        decoded.appendSlice(id_to_token[token_id]) catch unreachable;
+        decoded.appendSlice(allocator, id_to_token[token_id]) catch unreachable;
     }
 
-    return decoded.toOwnedSlice() catch unreachable;
+    return decoded.toOwnedSlice(allocator) catch unreachable;
 }
 
 test "encode empty string" {

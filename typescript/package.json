@@ -31,9 +31,10 @@
     "typescript": "^5.6.3"
   },
   "scripts": {
-    "build": "rm -rf dist .parcel-cache && npx parcel build",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "fmt": "npx prettier . --write"
+    "build": "bun run build.ts",
+    "test": "bun test",
+    "fmt": "bunx prettier . --write",
+    "typecheck": "bunx tsc --noEmit"
   },
   "repository": {
     "type": "git",

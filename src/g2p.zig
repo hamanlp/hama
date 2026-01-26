@@ -101,7 +101,7 @@ pub const Phonemizer = struct {
         var normalized: []const u8 = undefined;
         var generated: []const u8 = undefined;
         defer self.allocator.free(generated);
-        var ipas = std.ArrayList(u8).init(self.allocator);
+        var ipas = std.ArrayList(u8){};
         for (tokens) |token| {
             const token_text = input[token.begin..token.end];
             switch (token.token_type) {
@@ -121,12 +121,13 @@ pub const Phonemizer = struct {
                     generated = token_text;
                 },
             }
-            ipas.appendSlice(generated) catch unreachable;
+            ipas.appendSlice(self.allocator, generated) catch unreachable;
         }
         result.input = input.ptr;
         result.input_byte_count = input.len;
-        result.ipa_byte_count = ipas.items.len;
-        result.ipa = (ipas.toOwnedSlice() catch unreachable).ptr;
+        const ipas_slice = ipas.toOwnedSlice(self.allocator) catch unreachable;
+        result.ipa_byte_count = ipas_slice.len;
+        result.ipa = ipas_slice.ptr;
         return result;
     }
 
@@ -173,19 +174,19 @@ pub export fn deinit_phonemizer(phonemizer: *Phonemizer) void {
 pub fn tokenize(allocator: std.mem.Allocator, input: []const u8) []G2PToken {
     var lexer = G2PLexer.init(input);
 
-    var tokens = std.ArrayList(G2PToken).init(allocator);
+    var tokens = std.ArrayList(G2PToken){};
 
     while (true) {
         const maybe_token = lexer.next();
         if (maybe_token) |token| {
-            tokens.append(token) catch unreachable;
+            tokens.append(allocator, token) catch unreachable;
         } else {
             break;
         }
     }
 
     // Turn the ArrayList into a slice that we return.
-    return tokens.toOwnedSlice() catch unreachable;
+    return tokens.toOwnedSlice(allocator) catch unreachable;
 }
 /// Classify a single code point into one of our TokenType variants.
 fn classifyCodepointSlice(slice: []const u8) TokenType {

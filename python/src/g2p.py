@@ -1,4 +1,5 @@
 import struct
+from pathlib import Path
 import wasmtime
 
 # Offsets in the result structure (all offsets are in bytes)
@@ -23,9 +24,11 @@ class Phonemizer:
     def load(self):
         # Create a Wasmtime store.
         self.store = wasmtime.Store()
+        wasm_path = Path(__file__).parent / "hama-g2p.wasm"
+        if not wasm_path.exists():
+            raise FileNotFoundError(f"WASM file not found at {wasm_path}")
         # Open the file in binary mode and read its contents.
-        with open("hama-g2p.wasm", "rb") as f:
-            wasm_bytes = f.read()
+        wasm_bytes = wasm_path.read_bytes()
         # Create the module from the binary data.
         module = wasmtime.Module(self.store.engine, wasm_bytes)
 
@@ -38,11 +41,8 @@ class Phonemizer:
             jslog_func,
         )
 
-        # Build the import object. Order must match the module's expected imports.
-        imports = {"env": {"jslog": jslog}}
-
         # Instantiate the module with the given imports.
-        self.wasm_instance = wasmtime.Instance(self.store, module, [])
+        self.wasm_instance = wasmtime.Instance(self.store, module, [jslog])
         exports = self.wasm_instance.exports(self.store)
 
         # Retrieve exported functions.
@@ -124,4 +124,3 @@ if __name__ == "__main__":
     ipa_result = phonemizer.to_ipa(input_text)
     print("IPA:", ipa_result)
     phonemizer.deinit()
-

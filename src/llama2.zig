@@ -6,6 +6,7 @@ const assert = std.debug.assert;
 
 const DEFAULT_VECTOR_WIDTH: usize = std.simd.suggestVectorLength(f32) orelse 4;
 const simd_align = @alignOf(@Vector(DEFAULT_VECTOR_WIDTH, f32));
+const simd_alignment: std.mem.Alignment = std.mem.Alignment.fromByteUnits(simd_align);
 
 comptime {
     @setFloatMode(.optimized);
@@ -138,19 +139,19 @@ const RunState = struct {
     fn init(allocator: std.mem.Allocator, config: *const Config) !Self {
         const kv_dim = (config.dim * config.n_kv_heads) / config.n_heads;
         return Self{
-            .x = try allocator.alignedAlloc(f32, simd_align, config.dim),
-            .xb = try allocator.alignedAlloc(f32, simd_align, config.dim),
-            .xb2 = try allocator.alignedAlloc(f32, simd_align, config.dim),
-            .hb = try allocator.alignedAlloc(f32, simd_align, config.hidden_dim),
-            .hb2 = try allocator.alignedAlloc(f32, simd_align, config.hidden_dim),
-            .q = try allocator.alignedAlloc(f32, simd_align, config.dim),
-            .k = try allocator.alignedAlloc(f32, simd_align, kv_dim),
-            .v = try allocator.alignedAlloc(f32, simd_align, kv_dim),
-            .att = try allocator.alignedAlloc(f32, simd_align, config.n_heads * config.seq_len),
-            .logits = try allocator.alignedAlloc(f32, simd_align, config.vocab_size),
-            .logits_indexed = try allocator.alignedAlloc(IndexedF32, simd_align, config.vocab_size),
-            .key_cache = try allocator.alignedAlloc(f32, simd_align, config.n_layers * config.seq_len * kv_dim),
-            .value_cache = try allocator.alignedAlloc(f32, simd_align, config.n_layers * config.seq_len * kv_dim),
+            .x = try allocator.alignedAlloc(f32, simd_alignment, config.dim),
+            .xb = try allocator.alignedAlloc(f32, simd_alignment, config.dim),
+            .xb2 = try allocator.alignedAlloc(f32, simd_alignment, config.dim),
+            .hb = try allocator.alignedAlloc(f32, simd_alignment, config.hidden_dim),
+            .hb2 = try allocator.alignedAlloc(f32, simd_alignment, config.hidden_dim),
+            .q = try allocator.alignedAlloc(f32, simd_alignment, config.dim),
+            .k = try allocator.alignedAlloc(f32, simd_alignment, kv_dim),
+            .v = try allocator.alignedAlloc(f32, simd_alignment, kv_dim),
+            .att = try allocator.alignedAlloc(f32, simd_alignment, config.n_heads * config.seq_len),
+            .logits = try allocator.alignedAlloc(f32, simd_alignment, config.vocab_size),
+            .logits_indexed = try allocator.alignedAlloc(IndexedF32, simd_alignment, config.vocab_size),
+            .key_cache = try allocator.alignedAlloc(f32, simd_alignment, config.n_layers * config.seq_len * kv_dim),
+            .value_cache = try allocator.alignedAlloc(f32, simd_alignment, config.n_layers * config.seq_len * kv_dim),
         };
     }
 
@@ -685,7 +686,7 @@ pub const Llama2Runner = struct {
 
         seq_len = if (seq_len == 0) self.config.seq_len else seq_len;
         seq_len = std.math.clamp(seq_len, 1, self.config.seq_len); // clamp to seq_len
-        var generated = std.ArrayList(usize).init(self.allocator);
+        var generated = std.ArrayList(usize){};
 
         var pos: usize = 0; // the current position in the sequence
         while (pos < seq_len) : (pos += 1) {
@@ -706,7 +707,7 @@ pub const Llama2Runner = struct {
                     else
                         sample_top_p(self.state.logits, top_p, self.state.logits_indexed);
                 }
-                generated.append(next) catch unreachable;
+                generated.append(self.allocator, next) catch unreachable;
             }
 
             if (next == eos_token_id) {
@@ -716,7 +717,7 @@ pub const Llama2Runner = struct {
             token = next;
             transformer(token, pos, &self.config, &self.state, &self.weights);
         }
-        return generated.toOwnedSlice() catch unreachable;
+        return generated.toOwnedSlice(self.allocator) catch unreachable;
     }
 };
 test "matrix_multiplies" {
