@@ -1,6 +1,6 @@
 {
   "name": "hama-js",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "ONNX-powered grapheme-to-phoneme inference for Node, Bun, and browsers.",
   "type": "module",
   "main": "dist/node/index.js",
@@ -49,7 +49,7 @@
     "bun",
     "onnxruntime"
   ],
-  "author": "hama contributors",
+  "author": "Seongmin Park",
   "license": "Apache-2.0",
   "devDependencies": {
     "@types/node": "^20.19.25",

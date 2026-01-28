@@ -11,5 +11,7 @@ src/hama.egg-info/dependency_links.txt
 src/hama.egg-info/requires.txt
 src/hama.egg-info/top_level.txt
 src/hama/assets/__init__.py
+src/hama/assets/g2p_fp16.onnx
+src/hama/assets/g2p_vocab.json
 tests/test_inference.py
 tests/test_jamo.py

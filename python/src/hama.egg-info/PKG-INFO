@@ -1,9 +1,9 @@
 Metadata-Version: 2.4
 Name: hama
-Version: 0.1.0
+Version: 1.3.0
 Summary: Cross-platform grapheme-to-phoneme inference library powered by ONNX.
-Author: hama contributors
-License: MIT
+Author: Seongmin Park
+License: Apache-2.0
 Project-URL: Homepage, https://github.com/hamanlp/hama
 Requires-Python: >=3.9
 Description-Content-Type: text/markdown
