@@ -2,7 +2,7 @@ Project: hama – cross-platform grapheme-to-phoneme (G2P) inference runtime.
 
 Purpose:
 - Serve end-user inference for the latest hama Korean G2P model.
-- Ship in two forms: Python package (`hama`) and TypeScript package (`@hama/g2p`) with shared assets.
+- Ship in two forms: Python package (`hama`) and TypeScript package (`hama-js`) with shared assets and multiple subpath exports (e.g., `hama-js/g2p`).
 - Provide tokenizer/jamo utilities and minimal tests to validate inference.
 
 Shared assets:
@@ -14,7 +14,10 @@ Shared assets:
 
 Python package (python/):
 - Requirements: Python 3.9+, `uv` for dependency management.
-- Entry point: `hama` package located at `python/src/hama`.
+- Entry point: `hama` package located at `python/src/hama` (published on PyPI as `hama`).
+- Installation:
+  * Local dev: `cd python && uv sync --extra test` (preferred) or `pip install -e .[test]`.
+  * External users: `uv pip install hama` or `pip install hama`.
 
 Key modules/classes:
 1. `hama.G2PModel`
@@ -58,15 +61,22 @@ Testing instructions (Python):
 cd python
 uv sync --extra test
 uv run pytest
+# pip alternative
+pip install -e .[test]
+pytest
 ```
 
 TypeScript package (ts/):
 - Tooling: Bun 1.1+, TypeScript 5.9, `onnxruntime-node` and `onnxruntime-web`.
+- Published package name: `hama-js` on npm with subpaths (`/g2p`, `/g2p/browser`, `/jamo`, `/tokenizer`).
 - Build outputs:
   * Node/Bun bundle: `dist/node/index.js`.
   * Browser bundle: `dist/browser/index.js`.
   * Type declarations: `dist/types/*.d.ts`.
 - Assets copied into `dist/node/assets/` and `dist/browser/assets/` during build.
+- Installation:
+  * Local dev: `cd ts && bun install` (preferred) or `npm install` / `yarn install`.
+  * External users: `bun add hama-js`, `npm install hama-js`, or `yarn add hama-js`.
 
 Key exports:
 1. `G2PNodeModel` (ts/src/index.ts)
@@ -82,7 +92,7 @@ Key exports:
 
 Example Node usage:
 ```ts
-import { G2PNodeModel } from "@hama/g2p";
+import { G2PNodeModel } from "hama-js/g2p";
 
 const run = async () => {
   const model = await G2PNodeModel.create();
@@ -95,7 +105,7 @@ run().catch(console.error);
 
 Browser example:
 ```ts
-import { G2PBrowserModel } from "@hama/g2p/browser";
+import { G2PBrowserModel } from "hama-js/g2p/browser";
 
 const model = await G2PBrowserModel.create();
 const result = await model.predict("안녕하세요");
@@ -107,6 +117,10 @@ cd ts
 bun install
 bun run build
 bun test
+# npm alternative
+npm install
+npm run build
+npm test
 ```
 
 Testing expectations:

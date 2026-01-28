@@ -26,7 +26,7 @@ uv sync --extra test
 uv run pytest
 ```
 
-Quick demo script (`examples/python_demo.py`):
+Quick demo script (`python/example.py`):
 
 ```python
 from hama import G2PModel
@@ -46,7 +46,7 @@ if __name__ == "__main__":
 Run it with:
 
 ```bash
-uv run python examples/python_demo.py
+uv run python python/example.py
 ```
 
 The public API lives in `hama.__init__`:
@@ -67,9 +67,14 @@ cd ts
 bun install
 bun run build
 bun test
+
+# Install published package (instead of local dist/)
+bun add hama-js
+# or
+npm install hama-js
 ```
 
-Node/Bun demo (`examples/node_demo.mjs`):
+Node/Bun demo (`ts/example.js`):
 
 ```js
 import { G2PNodeModel } from "./dist/node/index.js";
@@ -90,14 +95,20 @@ run().catch((err) => {
 Execute it after building:
 
 ```bash
-node examples/node_demo.mjs
+node ts/example.js
+```
+
+Using the published package instead of the local dist:
+
+```js
+import { G2PNodeModel } from "hama-js/g2p";
 ```
 
 API overview:
 
 - `G2PNodeModel.create({ modelPath?, maxInputLen?, maxOutputLen? })`
 - `model.predict(text)` → `{ ipa, alignments }`
-- Browser bundle: `import { G2PBrowserModel } from "@hama/g2p/browser";`
+- Browser bundle: `import { G2PBrowserModel } from "hama-js/g2p/browser";`
   (loads `onnxruntime-web` and fetches the embedded ONNX file)
 
 The package already copies `assets/g2p_fp16.onnx` + `g2p_vocab.json` into the `dist`
@@ -125,6 +136,6 @@ ts/tests/               # bun test suite
 
 ## Next steps
 
-- Publish `python/` via `uv publish` / PyPI, and `ts/` as `@hama/g2p`.
+- Publish `python/` via `uv publish` / PyPI, and `ts/` as `hama-js`.
 - Integrate CI to run both `uv run pytest` and `bun test`.
 - Wire up docs/examples + simple CLI wrappers if needed.

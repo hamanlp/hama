@@ -1,5 +1,5 @@
 {
-  "name": "@hama/g2p",
+  "name": "hama-js",
   "version": "0.1.0",
   "description": "ONNX-powered grapheme-to-phoneme inference for Node, Bun, and browsers.",
   "type": "module",
@@ -11,9 +11,25 @@
       "import": "./dist/node/index.js",
       "types": "./dist/types/index.d.ts"
     },
+    "./g2p": {
+      "import": "./dist/node/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
     "./browser": {
       "import": "./dist/browser/index.js",
       "types": "./dist/types/browser.d.ts"
+    },
+    "./g2p/browser": {
+      "import": "./dist/browser/index.js",
+      "types": "./dist/types/browser.d.ts"
+    },
+    "./jamo": {
+      "import": "./dist/node/jamo.js",
+      "types": "./dist/types/jamo.d.ts"
+    },
+    "./tokenizer": {
+      "import": "./dist/node/tokenizer.js",
+      "types": "./dist/types/tokenizer.d.ts"
     }
   },
   "scripts": {

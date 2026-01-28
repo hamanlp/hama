@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "@hama/g2p",
+      "name": "hama-js",
       "dependencies": {
         "onnxruntime-node": "^1.23.2",
         "onnxruntime-web": "^1.23.2",
