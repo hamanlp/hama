@@ -17,29 +17,55 @@ export interface JamoSequence {
 const isHangulSyllable = (code: number) =>
   code >= S_BASE && code < S_BASE + S_COUNT;
 
+const WHITESPACE_REGEX = /\s/;
+
 export const splitTextToJamo = (text: string): JamoSequence => {
   const tokens: string[] = [];
   const mapping: number[] = [];
-  [...text].forEach((ch, idx) => {
-    const code = ch.codePointAt(0)!;
-    if (!isHangulSyllable(code)) {
-      tokens.push(ch);
-      mapping.push(idx);
-      return;
+  const normalized = text.toLocaleLowerCase("und");
+  let index = 0;
+  while (index < normalized.length) {
+    const code = normalized.codePointAt(index)!;
+    const char = String.fromCodePoint(code);
+    const charLen = char.length;
+
+    if (WHITESPACE_REGEX.test(char)) {
+      tokens.push(char);
+      mapping.push(index);
+      index += charLen;
+      continue;
     }
-    const syllableIndex = code - S_BASE;
-    const l = Math.floor(syllableIndex / N_COUNT);
-    const v = Math.floor((syllableIndex % N_COUNT) / T_COUNT);
-    const t = syllableIndex % T_COUNT;
-    tokens.push(String.fromCodePoint(L_BASE + l));
-    mapping.push(idx);
-    tokens.push(String.fromCodePoint(V_BASE + v));
-    mapping.push(idx);
-    if (t !== 0) {
-      tokens.push(String.fromCodePoint(T_BASE + t));
-      mapping.push(idx);
+
+    while (index < normalized.length) {
+      const innerCode = normalized.codePointAt(index)!;
+      const innerChar = String.fromCodePoint(innerCode);
+      const innerLen = innerChar.length;
+      if (WHITESPACE_REGEX.test(innerChar)) {
+        break;
+      }
+
+      if (!isHangulSyllable(innerCode)) {
+        tokens.push(innerChar);
+        mapping.push(index);
+        index += innerLen;
+        continue;
+      }
+
+      const syllableIndex = innerCode - S_BASE;
+      const l = Math.floor(syllableIndex / N_COUNT);
+      const v = Math.floor((syllableIndex % N_COUNT) / T_COUNT);
+      const t = syllableIndex % T_COUNT;
+      tokens.push(String.fromCodePoint(L_BASE + l));
+      mapping.push(index);
+      tokens.push(String.fromCodePoint(V_BASE + v));
+      mapping.push(index);
+      if (t !== 0) {
+        tokens.push(String.fromCodePoint(T_BASE + t));
+        mapping.push(index);
+      }
+      index += innerLen;
     }
-  });
+  }
   return { tokens, originalIndices: mapping };
 };
 

@@ -48,10 +48,24 @@ class JamoSequence:
 def split_text_to_jamo(text: str) -> JamoSequence:
     tokens: List[str] = []
     mapping: List[int] = []
-    for idx, ch in enumerate(text):
-        syllable_parts = split_syllable(ch)
-        tokens.extend(syllable_parts)
-        mapping.extend([idx] * len(syllable_parts))
+    normalized = text.casefold()
+    idx = 0
+    length = len(normalized)
+    while idx < length:
+        ch = normalized[idx]
+        if ch.isspace():
+            tokens.append(ch)
+            mapping.append(idx)
+            idx += 1
+            continue
+
+        while idx < length and not normalized[idx].isspace():
+            ch = normalized[idx]
+            syllable_parts = split_syllable(ch)
+            tokens.extend(syllable_parts)
+            mapping.extend([idx] * len(syllable_parts))
+            idx += 1
+        # loop continues; idx already at next char (whitespace or end)
     return JamoSequence(tokens=tokens, original_indices=mapping)
 
 
