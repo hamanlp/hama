@@ -19,6 +19,10 @@ const decoderTokenToId = new Map(
 export interface Alignment {
   phoneme: string;
   phonemeIndex: number;
+  /**
+   * Original input character index for this phoneme alignment.
+   * Uses -1 sentinel when the input has no non-whitespace characters.
+   */
   charIndex: number;
 }
 
@@ -39,6 +43,7 @@ export const encodeText = (
 ): EncodedText => {
   const jamoSeq: JamoSequence = splitTextToJamo(text);
   const tokens = jamoSeq.tokens.length ? jamoSeq.tokens : ["<unk>"];
+  const indices = jamoSeq.originalIndices.length ? jamoSeq.originalIndices : [-1];
   const ids = tokens.map(
     (token) => encoderTokenToId.get(token) ?? encoderTokenToId.get("<unk>")!,
   );
@@ -49,14 +54,15 @@ export const encodeText = (
   for (let i = 0; i < length; i++) {
     padded[i] = BigInt(ids[i]);
   }
-  const positionMap = jamoSeq.originalIndices.slice(0, length);
-  return { ids: padded, length, positionMap: positionMap.length ? positionMap : [0] };
+  const positionMap = indices.slice(0, length);
+  return { ids: padded, length, positionMap: positionMap.length ? positionMap : [-1] };
 };
 
 export const decoderIds = {
   pad: decoderTokenToId.get("<pad>")!,
   sos: decoderTokenToId.get("<sos>")!,
   eos: decoderTokenToId.get("<eos>")!,
+  unk: decoderTokenToId.get("<unk>")!,
 };
 
 export const decodeIdsToResult = (
@@ -66,6 +72,7 @@ export const decodeIdsToResult = (
 ): G2PResult => {
   const phonemes: string[] = [];
   const alignments: Alignment[] = [];
+  let outOfRangeTokenCount = 0;
 
   for (let i = 0; i < ids.length; i++) {
     const tokenId = Number(ids[i]);
@@ -73,7 +80,10 @@ export const decodeIdsToResult = (
     if (tokenId === decoderIds.pad) continue;
     if (tokenId === decoderIds.sos && phonemes.length === 0) continue;
 
-    const phoneme = VOCAB.decoder[tokenId] ?? "";
+    const phoneme = VOCAB.decoder[tokenId];
+    if (phoneme === undefined) {
+      outOfRangeTokenCount += 1;
+    }
     const srcPos = Math.max(
       0,
       Math.min(
@@ -81,13 +91,19 @@ export const decodeIdsToResult = (
         positionMap.length > 0 ? positionMap.length - 1 : 0,
       ),
     );
-    const charIndex = positionMap.length > 0 ? positionMap[srcPos] : 0;
+    const charIndex = positionMap.length > 0 ? positionMap[srcPos] : -1;
     alignments.push({
-      phoneme,
+      phoneme: phoneme ?? VOCAB.decoder[decoderIds.unk],
       phonemeIndex: alignments.length,
       charIndex,
     });
-    phonemes.push(phoneme);
+    phonemes.push(phoneme ?? VOCAB.decoder[decoderIds.unk]);
+  }
+
+  if (outOfRangeTokenCount > 0 && typeof console !== "undefined") {
+    console.warn(
+      `[hama-js] decodeIdsToResult saw ${outOfRangeTokenCount} out-of-range decoder ids; mapped to <unk>.`,
+    );
   }
 
   return { ipa: phonemes.join(""), alignments };

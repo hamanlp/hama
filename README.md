@@ -8,9 +8,6 @@ pure inference scenarios. It ships:
 - shared tokenizer + Hangul jamo helpers
 - reproducible tests for both runtimes
 
-The training stack continues to live in [`hama-training`](../hama-training); this
-repo focuses purely on runtime ergonomics.
-
 ## Assets
 
 `assets/` contains the frozen `g2p_fp16.onnx` graph plus the decoder/encoder vocab.
@@ -54,6 +51,7 @@ The public API lives in `hama.__init__`:
 - `split_text_to_jamo` / `join_jamo_tokens` – reversible Hangul disassembly
 - `G2PModel.predict(text)` – returns IPA string plus `phoneme -> char_index`
   alignments derived from attention weights
+- `char_index` is `-1` only for whitespace-only input
 
 Pass `model_path` / `vocab_path` to `G2PModel` to point at custom checkpoints
 and call `predict` repeatedly (the ONNX session is cached).
@@ -108,6 +106,7 @@ API overview:
 
 - `G2PNodeModel.create({ modelPath?, maxInputLen?, maxOutputLen? })`
 - `model.predict(text)` → `{ ipa, alignments }`
+- `alignments[].charIndex` is `-1` only for whitespace-only input
 - Browser bundle: `import { G2PBrowserModel } from "hama-js/g2p/browser";`
   (loads `onnxruntime-web` and fetches the embedded ONNX file)
 
@@ -120,9 +119,14 @@ relative to the built module).
 
 - Both runtimes use identical Hangul jamo logic so character indices map back to
   the original graphemes, even after jamo expansion.
+- Inputs are case-normalized (`casefold` in Python, locale-lower in TS) and
+  whitespace is ignored during tokenization.
 - Input length defaults to 128 time steps to accommodate Korean + mixed tokens.
+- `maxOutputLen` is retained in the API for compatibility, but autoregressive
+  ONNX exports determine decode length inside the graph.
 - Output alignment is derived from attention argmax, mirroring the training
   scripts.
+- For whitespace-only inputs, alignments use `char_index = -1` sentinel.
 
 ## Project layout
 

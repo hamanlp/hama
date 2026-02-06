@@ -26,7 +26,7 @@ class TextTokenizer:
         tokens = jamo_sequence.tokens
         if not tokens:
             tokens = ["<unk>"]
-            jamo_sequence.original_indices = [0]
+            jamo_sequence.original_indices = [-1]
 
         ids = [
             self.vocab.encoder_token_to_id.get(token, self.vocab.encoder_token_to_id["<unk>"])
@@ -36,5 +36,5 @@ class TextTokenizer:
         trimmed_ids = ids[: self.max_input_len]
         padded = np.full((self.max_input_len,), self.vocab.encoder_token_to_id["<pad>"], dtype=np.int64)
         padded[: len(trimmed_ids)] = trimmed_ids
-        position_map = jamo_sequence.original_indices[:length] or [0]
+        position_map = jamo_sequence.original_indices[:length] or [-1]
         return EncodedText(ids=padded, length=length, position_map=position_map)

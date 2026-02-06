@@ -22,32 +22,27 @@ const WHITESPACE_REGEX = /\s/;
 export const splitTextToJamo = (text: string): JamoSequence => {
   const tokens: string[] = [];
   const mapping: number[] = [];
-  const normalized = text.toLocaleLowerCase("und");
-  let index = 0;
-  while (index < normalized.length) {
-    const code = normalized.codePointAt(index)!;
-    const char = String.fromCodePoint(code);
-    const charLen = char.length;
-
-    if (WHITESPACE_REGEX.test(char)) {
-      tokens.push(char);
-      mapping.push(index);
-      index += charLen;
+  let offset = 0;
+  let charIndex = 0;
+  while (offset < text.length) {
+    const code = text.codePointAt(offset)!;
+    const ch = String.fromCodePoint(code);
+    const charLen = ch.length;
+    offset += charLen;
+    if (WHITESPACE_REGEX.test(ch)) {
+      charIndex += 1;
       continue;
     }
-
-    while (index < normalized.length) {
-      const innerCode = normalized.codePointAt(index)!;
+    const normalizedPart = ch.toLocaleLowerCase("und");
+    let normalizedOffset = 0;
+    while (normalizedOffset < normalizedPart.length) {
+      const innerCode = normalizedPart.codePointAt(normalizedOffset)!;
       const innerChar = String.fromCodePoint(innerCode);
-      const innerLen = innerChar.length;
-      if (WHITESPACE_REGEX.test(innerChar)) {
-        break;
-      }
+      normalizedOffset += innerChar.length;
 
       if (!isHangulSyllable(innerCode)) {
         tokens.push(innerChar);
-        mapping.push(index);
-        index += innerLen;
+        mapping.push(charIndex);
         continue;
       }
 
@@ -56,15 +51,15 @@ export const splitTextToJamo = (text: string): JamoSequence => {
       const v = Math.floor((syllableIndex % N_COUNT) / T_COUNT);
       const t = syllableIndex % T_COUNT;
       tokens.push(String.fromCodePoint(L_BASE + l));
-      mapping.push(index);
+      mapping.push(charIndex);
       tokens.push(String.fromCodePoint(V_BASE + v));
-      mapping.push(index);
+      mapping.push(charIndex);
       if (t !== 0) {
         tokens.push(String.fromCodePoint(T_BASE + t));
-        mapping.push(index);
+        mapping.push(charIndex);
       }
-      index += innerLen;
     }
+    charIndex += 1;
   }
   return { tokens, originalIndices: mapping };
 };

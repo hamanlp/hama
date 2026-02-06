@@ -28,6 +28,7 @@ export class G2PNodeModel {
     const opts: Required<G2POptions> = {
       modelPath: options.modelPath ?? defaultModelPath,
       maxInputLen: options.maxInputLen ?? 128,
+      // Retained for API compatibility; autoregressive ONNX sets output length in-graph.
       maxOutputLen: options.maxOutputLen ?? 32,
     };
     const session = await InferenceSession.create(opts.modelPath, {

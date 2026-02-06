@@ -14,6 +14,12 @@ from .vocab import Vocabulary
 
 @dataclass
 class G2PAlignment:
+    """Single phoneme alignment.
+
+    `char_index` points to the original input character index.
+    It is `-1` when the input has no non-whitespace characters.
+    """
+
     phoneme: str
     phoneme_index: int
     char_index: int
@@ -76,7 +82,7 @@ class G2PModel:
                 continue
             phoneme = self.vocab.decoder[token_id]
             src_pos = int(attn_indices[idx]) if idx < len(attn_indices) else 0
-            char_index = position_map[src_pos] if src_pos < len(position_map) else 0
+            char_index = position_map[src_pos] if src_pos < len(position_map) else -1
             alignments.append(
                 G2PAlignment(
                     phoneme=phoneme,

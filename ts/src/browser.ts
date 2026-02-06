@@ -22,6 +22,7 @@ export class G2PBrowserModel {
     const opts: Required<BrowserOptions> = {
       modelUrl: options.modelUrl ?? DEFAULT_MODEL_URL,
       maxInputLen: options.maxInputLen ?? 128,
+      // Retained for API compatibility; autoregressive ONNX sets output length in-graph.
       maxOutputLen: options.maxOutputLen ?? 32,
     };
     const model = new G2PBrowserModel(opts);

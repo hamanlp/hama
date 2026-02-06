@@ -24,18 +24,19 @@ Key modules/classes:
    - Constructor keyword args:
      * `model_path: Optional[PathLike]` (defaults to embedded `g2p_fp16.onnx`).
      * `vocab_path: Optional[PathLike]` (defaults to embedded `g2p_vocab.json`).
-     * `provider: str` (default `CPUExecutionProvider`, passed to onnxruntime).
-     * `max_input_len: int = 128`, `max_output_len: int = 32`.
+     * `providers: Optional[Sequence[str]]` (passed to onnxruntime).
+     * `max_input_len: int = 128`, `max_output_len: int = 32` (`max_output_len` retained for API compatibility; ONNX decode length is graph-defined).
    - Methods:
      * `predict(text: str) -> G2PResult`
        - Runs tokenization, ONNX inference, and decoding to IPA.
-   - Behavior: caches `onnxruntime.InferenceSession`; raises ValueError if text empty.
+   - Behavior: caches `onnxruntime.InferenceSession`.
 
 2. `hama.G2PResult`
    - Fields: `ipa: str`, `alignments: list[G2PAlignment]`.
 
 3. `hama.G2PAlignment`
    - Fields: `phoneme: str`, `phoneme_index: int`, `char_index: int`.
+   - `char_index = -1` is a sentinel used only when input has no non-whitespace characters.
 
 4. Tokenization helpers:
    - `hama.TextTokenizer` / `hama.Vocabulary`.
@@ -44,6 +45,13 @@ Key modules/classes:
    - Alignment reconstruction: ONNX returns `attn_indices`; map each index through `position_map` (token→original-char) to emit `G2PAlignment(char_index=position_map[attn_idx], phoneme=phoneme)`.
 
 5. Assets module `hama.assets` exposes package resources (no public API beyond resource loading).
+
+Preprocessing behavior (important for docs):
+- Inputs are Unicode-casefolded in Python (`text.casefold()`), and lowercased in JS with `toLocaleLowerCase("und")`.
+- JS lowercasing is not full Unicode casefold (for example, `ß` remains `ß` in JS lowercasing, while Python casefold expands to `ss`).
+- Whitespace characters are skipped during tokenization (leading/trailing/multiple whitespace do not change the token stream).
+- Alignment indices never point to whitespace characters because whitespace is not tokenized.
+- For whitespace-only input (no non-whitespace source token), alignments use sentinel `char_index = -1`.
 
 Usage pattern (docs should show):
 ```python
@@ -83,12 +91,14 @@ Key exports:
    - Static method `create(options?: { modelPath?: string; maxInputLen?: number; maxOutputLen?: number; }) -> Promise<G2PNodeModel>`.
    - Instance method `predict(text: string) -> Promise<{ ipa: string; alignments: Alignment[] }>` where `Alignment` matches Python fields.
    - Uses `onnxruntime-node` with BigInt tensors; loads default ONNX from packaged assets via `import.meta.url`.
+   - `maxOutputLen` is retained for API compatibility; decode length is controlled by the ONNX autoregressive graph.
 
 2. `G2PBrowserModel` (ts/src/browser.ts)
-   - Static `create({ modelUrl?, vocabUrl?, ... }?)` returning promise.
+   - Static `create({ modelUrl?, maxInputLen?, maxOutputLen? }?)` returning promise.
    - Uses `onnxruntime-web` and fetch API to load ONNX/vocab.
 
 3. `splitTextToJamo`, `joinJamoTokens`, tokenizer utilities mirrored from Python (ts/src/jamo.ts, ts/src/tokenizer.ts). `decodeIdsToResult` combines `decoded_ids` and `attn_indices`, and consults `positionMap` to map attention indices to original character positions (ensuring alignments match Python).
+   - TS uses code-point based `charIndex` mapping (not UTF-16 code-unit offsets), so non-BMP characters align consistently with Python semantics.
 
 Example Node usage:
 ```ts
@@ -124,13 +134,12 @@ npm test
 ```
 
 Testing expectations:
-- `ts/tests/g2p.test.ts` asserts `G2PNodeModel` returns non-empty IPA and alignment count equals IPA length.
+- `ts/tests/g2p.test.ts` asserts `G2PNodeModel` returns non-empty IPA, alignments exist, and alignments map to non-whitespace indices.
 - `ts/tests/jamo.test.ts` ensures jamo helpers round-trip Hangul.
 - Python tests: `python/tests/test_inference.py` (default assets), `python/tests/test_jamo.py`.
 
 Other notes:
-- README includes setup instructions and example scripts (`examples/python_demo.py`, `examples/node_demo.mjs`).
-- ONNX conversion pipeline lives in sibling repo `../hama-training`; updated script `scripts/export_onnx.py` handles fp16 conversion recursively.
+- README includes setup instructions and example scripts (`python/example.py`, `ts/example.js`).
 - Both runtimes rely on shared vocabulary to map encoder tokens to phonemes.
 - Alignment extraction is attention argmax-driven; identical logic in both languages.
 
