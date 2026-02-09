@@ -50,10 +50,10 @@ def test_whitespace_only_input_alignment_uses_sentinel_index():
     assert all(al.char_index == -1 for al in result.alignments)
 
 
-def test_casefold_equivalence_for_eszett():
+def test_lowercase_equivalence_for_ascii_letters():
     model = G2PModel()
-    first = model.predict("Straße")
-    second = model.predict("STRASSE")
+    first = model.predict("Hello")
+    second = model.predict("HELLO")
     assert first.ipa == second.ipa
 
 
@@ -64,3 +64,15 @@ def test_non_bmp_and_hangul_alignment_indices_are_valid():
     assert result.alignments
     for alignment in result.alignments:
         assert -1 <= alignment.char_index < len(text)
+
+
+def test_default_whitespace_split_inserts_single_space_between_segments():
+    model = G2PModel()
+    result = model.predict("hello   world")
+    assert " " in result.ipa
+
+
+def test_custom_split_delimiter_is_applied():
+    model = G2PModel()
+    result = model.predict("hello,world", split_delimiter=",", output_delimiter=" | ")
+    assert " | " in result.ipa

@@ -51,6 +51,8 @@ The public API lives in `hama.__init__`:
 - `split_text_to_jamo` / `join_jamo_tokens` – reversible Hangul disassembly
 - `G2PModel.predict(text)` – returns IPA string plus `phoneme -> char_index`
   alignments derived from attention weights
+- `predict(..., split_delimiter=r"\s+", output_delimiter=" ")` can segment input
+  before inference and join segment IPA outputs with a delimiter
 - `char_index` is `-1` only for whitespace-only input
 
 Pass `model_path` / `vocab_path` to `G2PModel` to point at custom checkpoints
@@ -105,7 +107,8 @@ import { G2PNodeModel } from "hama-js/g2p";
 API overview:
 
 - `G2PNodeModel.create({ modelPath?, maxInputLen?, maxOutputLen? })`
-- `model.predict(text)` → `{ ipa, alignments }`
+- `model.predict(text, { splitDelimiter?: /\s+/u by default, outputDelimiter?: " " })`
+  → `{ ipa, alignments }`
 - `alignments[].charIndex` is `-1` only for whitespace-only input
 - Browser bundle: `import { G2PBrowserModel } from "hama-js/g2p/browser";`
   (loads `onnxruntime-web` and fetches the embedded ONNX file)
@@ -119,7 +122,7 @@ relative to the built module).
 
 - Both runtimes use identical Hangul jamo logic so character indices map back to
   the original graphemes, even after jamo expansion.
-- Inputs are case-normalized (`casefold` in Python, locale-lower in TS) and
+- Inputs are case-normalized (lowercased in both Python and TS) and
   whitespace is ignored during tokenization.
 - Input length defaults to 128 time steps to accommodate Korean + mixed tokens.
 - `maxOutputLen` is retained in the API for compatibility, but autoregressive

@@ -63,4 +63,19 @@ describe("G2PNodeModel", () => {
       expect(alignment.charIndex).toBeLessThan(text.length);
     }
   });
+
+  it("inserts a single space when split by default whitespace", async () => {
+    const model = await G2PNodeModel.create();
+    const result = await model.predict("hello   world");
+    expect(result.ipa.includes(" ")).toBe(true);
+  });
+
+  it("supports a custom split delimiter and output delimiter", async () => {
+    const model = await G2PNodeModel.create();
+    const result = await model.predict("hello,world", {
+      splitDelimiter: ",",
+      outputDelimiter: " | ",
+    });
+    expect(result.ipa.includes(" | ")).toBe(true);
+  });
 });

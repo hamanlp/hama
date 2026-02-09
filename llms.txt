@@ -29,6 +29,8 @@ Key modules/classes:
    - Methods:
      * `predict(text: str) -> G2PResult`
        - Runs tokenization, ONNX inference, and decoding to IPA.
+     * `predict(text: str, split_delimiter: str|Pattern|None = r"\s+", output_delimiter: str = " ") -> G2PResult`
+       - Splits input by delimiter (default all whitespace), infers per segment, and joins segment IPA outputs with `output_delimiter`.
    - Behavior: caches `onnxruntime.InferenceSession`.
 
 2. `hama.G2PResult`
@@ -47,8 +49,7 @@ Key modules/classes:
 5. Assets module `hama.assets` exposes package resources (no public API beyond resource loading).
 
 Preprocessing behavior (important for docs):
-- Inputs are Unicode-casefolded in Python (`text.casefold()`), and lowercased in JS with `toLocaleLowerCase("und")`.
-- JS lowercasing is not full Unicode casefold (for example, `ß` remains `ß` in JS lowercasing, while Python casefold expands to `ss`).
+- Inputs are lowercased in both Python (`text.lower()`) and JS (`toLocaleLowerCase("und")`).
 - Whitespace characters are skipped during tokenization (leading/trailing/multiple whitespace do not change the token stream).
 - Alignment indices never point to whitespace characters because whitespace is not tokenized.
 - For whitespace-only input (no non-whitespace source token), alignments use sentinel `char_index = -1`.
@@ -89,12 +90,13 @@ TypeScript package (ts/):
 Key exports:
 1. `G2PNodeModel` (ts/src/index.ts)
    - Static method `create(options?: { modelPath?: string; maxInputLen?: number; maxOutputLen?: number; }) -> Promise<G2PNodeModel>`.
-   - Instance method `predict(text: string) -> Promise<{ ipa: string; alignments: Alignment[] }>` where `Alignment` matches Python fields.
+   - Instance method `predict(text: string, { splitDelimiter?: string|RegExp|null, outputDelimiter?: string }?) -> Promise<{ ipa: string; alignments: Alignment[] }>` where `Alignment` matches Python fields.
    - Uses `onnxruntime-node` with BigInt tensors; loads default ONNX from packaged assets via `import.meta.url`.
    - `maxOutputLen` is retained for API compatibility; decode length is controlled by the ONNX autoregressive graph.
 
 2. `G2PBrowserModel` (ts/src/browser.ts)
    - Static `create({ modelUrl?, maxInputLen?, maxOutputLen? }?)` returning promise.
+   - `predict` accepts the same split/output delimiter options as Node.
    - Uses `onnxruntime-web` and fetch API to load ONNX/vocab.
 
 3. `splitTextToJamo`, `joinJamoTokens`, tokenizer utilities mirrored from Python (ts/src/jamo.ts, ts/src/tokenizer.ts). `decodeIdsToResult` combines `decoded_ids` and `attn_indices`, and consults `positionMap` to map attention indices to original character positions (ensuring alignments match Python).

@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import List, Sequence
+import re
+from typing import List, Pattern, Sequence
 
 import numpy as np
 import onnxruntime as ort
 
-from .tokenizer import EncodedText, TextTokenizer
+from .tokenizer import TextTokenizer
 from .vocab import Vocabulary
 
 
@@ -51,10 +52,50 @@ class G2PModel:
             providers=list(providers) if providers else None,
         )
 
-    def __call__(self, text: str) -> G2PResult:
-        return self.predict(text)
+    def __call__(
+        self,
+        text: str,
+        split_delimiter: str | Pattern[str] | None = r"\s+",
+        output_delimiter: str = " ",
+    ) -> G2PResult:
+        return self.predict(
+            text=text,
+            split_delimiter=split_delimiter,
+            output_delimiter=output_delimiter,
+        )
 
-    def predict(self, text: str) -> G2PResult:
+    def predict(
+        self,
+        text: str,
+        split_delimiter: str | Pattern[str] | None = r"\s+",
+        output_delimiter: str = " ",
+    ) -> G2PResult:
+        segments = self._segment_text(text=text, split_delimiter=split_delimiter)
+        if not segments:
+            return self._predict_single(text=text, base_char_index=0)
+
+        segment_results = [
+            self._predict_single(text=segment_text, base_char_index=segment_start)
+            for segment_text, segment_start in segments
+        ]
+
+        ipa_parts: List[str] = []
+        alignments: List[G2PAlignment] = []
+        for idx, segment_result in enumerate(segment_results):
+            if idx > 0:
+                ipa_parts.append(output_delimiter)
+            ipa_parts.append(segment_result.ipa)
+            for alignment in segment_result.alignments:
+                alignments.append(
+                    G2PAlignment(
+                        phoneme=alignment.phoneme,
+                        phoneme_index=len(alignments),
+                        char_index=alignment.char_index,
+                    )
+                )
+        return G2PResult(ipa="".join(ipa_parts), alignments=alignments)
+
+    def _predict_single(self, text: str, base_char_index: int) -> G2PResult:
         encoding = self.tokenizer.encode(text)
         inputs = {
             "input_ids": encoding.ids.reshape(1, -1),
@@ -62,7 +103,46 @@ class G2PModel:
         }
         decoded_ids, attn_indices = self.session.run(None, inputs)
         phonemes, alignments = self._decode(decoded_ids[0], attn_indices[0], encoding.position_map)
-        return G2PResult(ipa="".join(phonemes), alignments=alignments)
+        adjusted_alignments = [
+            G2PAlignment(
+                phoneme=alignment.phoneme,
+                phoneme_index=alignment.phoneme_index,
+                char_index=(
+                    alignment.char_index
+                    if alignment.char_index < 0
+                    else alignment.char_index + base_char_index
+                ),
+            )
+            for alignment in alignments
+        ]
+        return G2PResult(ipa="".join(phonemes), alignments=adjusted_alignments)
+
+    def _segment_text(
+        self,
+        text: str,
+        split_delimiter: str | Pattern[str] | None,
+    ) -> List[tuple[str, int]]:
+        if split_delimiter is None:
+            return [(text, 0)]
+
+        pattern = (
+            re.compile(split_delimiter)
+            if isinstance(split_delimiter, str)
+            else split_delimiter
+        )
+        if pattern.match(""):
+            raise ValueError("split_delimiter must not match an empty string")
+
+        segments: List[tuple[str, int]] = []
+        start = 0
+        for match in pattern.finditer(text):
+            end = match.start()
+            if end > start:
+                segments.append((text[start:end], start))
+            start = match.end()
+        if start < len(text):
+            segments.append((text[start:], start))
+        return segments
 
     def _decode(
         self,

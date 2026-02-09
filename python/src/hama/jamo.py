@@ -51,7 +51,7 @@ def split_text_to_jamo(text: str) -> JamoSequence:
     for original_idx, ch in enumerate(text):
         if ch.isspace():
             continue
-        for normalized_ch in ch.casefold():
+        for normalized_ch in ch.lower():
             syllable_parts = split_syllable(normalized_ch)
             tokens.extend(syllable_parts)
             mapping.extend([original_idx] * len(syllable_parts))
