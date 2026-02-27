@@ -36,11 +36,12 @@
     "build": "bun run build:node && bun run build:browser",
     "build:node": "tsc -p tsconfig.node.json && rm -rf dist/node/assets && mkdir -p dist/node/assets && cp -R src/assets/. dist/node/assets",
     "build:browser": "tsc -p tsconfig.browser.json && rm -rf dist/browser/assets && mkdir -p dist/browser/assets && cp -R src/assets/. dist/browser/assets",
-    "test": "bun test"
+    "test": "bun test",
+    "validate:model": "bun run scripts/validate-model.ts"
   },
   "files": [
     "dist/",
-    "src/assets/g2p_fp16.onnx",
+    "src/assets/*.onnx",
     "src/assets/g2p_vocab.json"
   ],
   "keywords": [
