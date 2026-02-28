@@ -10,8 +10,13 @@ pure inference scenarios. It ships:
 
 ## Assets
 
-`assets/` contains the frozen `g2p_fp16.onnx` graph plus the decoder/encoder vocab.
-Each subpackage embeds a copy so it can work out-of-the-box.
+`assets/` contains:
+
+- `encoder.onnx` + `decoder_step.onnx` (split runtime, recommended)
+- `g2p_vocab.json`
+
+Both runtimes use split assets by default. A legacy single-file ONNX is still
+supported only when you explicitly provide `model_path`/`modelPath`.
 
 ## Python package (`python/`)
 
@@ -21,6 +26,7 @@ Requirements: `uv>=0.3`, Python 3.9+.
 cd python
 uv sync --extra test
 uv run pytest
+uv run pytest tests/test_split_assets.py -q
 ```
 
 Quick demo script (`python/example.py`):
@@ -55,8 +61,9 @@ The public API lives in `hama.__init__`:
   before inference and join segment IPA outputs with a delimiter
 - `char_index` is `-1` only for whitespace-only input
 
-Pass `model_path` / `vocab_path` to `G2PModel` to point at custom checkpoints
-and call `predict` repeatedly (the ONNX session is cached).
+Pass `encoder_model_path` + `decoder_step_model_path` (recommended split mode),
+or `model_path` (single-file fallback), plus optional `vocab_path` for custom
+assets.
 
 ## TypeScript + Bun (`ts/`)
 
@@ -67,6 +74,7 @@ cd ts
 bun install
 bun run build
 bun test
+bun run validate:model:split
 
 # Install published package (instead of local dist/)
 bun add hama-js
@@ -106,17 +114,16 @@ import { G2PNodeModel } from "hama-js/g2p";
 
 API overview:
 
-- `G2PNodeModel.create({ modelPath?, maxInputLen?, maxOutputLen? })`
+- `G2PNodeModel.create({ modelPath?, encoderModelPath?, decoderStepModelPath?, maxInputLen?, maxOutputLen? })`
 - `model.predict(text, { splitDelimiter?: /\s+/u by default, outputDelimiter?: " " })`
   → `{ ipa, alignments }`
 - `alignments[].charIndex` is `-1` only for whitespace-only input
 - Browser bundle: `import { G2PBrowserModel } from "hama-js/g2p/browser";`
-  (loads `onnxruntime-web` and fetches the embedded ONNX file)
+  with `G2PBrowserModel.create({ modelUrl?, encoderUrl?, decoderStepUrl?, ... })`
 
-The package already copies `assets/g2p_fp16.onnx` + `g2p_vocab.json` into the `dist`
-folder so Node/Bun resolves them via `import.meta.url`. For browser deployments,
-ensure the assets are hosted next to the bundle (the default URL resolves
-relative to the built module).
+The package copies `assets/*.onnx` + `g2p_vocab.json` into `dist` so Node/Bun
+resolves them via `import.meta.url`. For browser deployments, host the ONNX
+assets next to the bundle (default URLs resolve relative to the built module).
 
 ## Shared design notes
 
@@ -125,8 +132,8 @@ relative to the built module).
 - Inputs are case-normalized (lowercased in both Python and TS) and
   whitespace is ignored during tokenization.
 - Input length defaults to 128 time steps to accommodate Korean + mixed tokens.
-- `maxOutputLen` is retained in the API for compatibility, but autoregressive
-  ONNX exports determine decode length inside the graph.
+- `maxOutputLen` controls host-side greedy decoding in split mode, and remains
+  a compatibility option for single-file mode.
 - Output alignment is derived from attention argmax, mirroring the training
   scripts.
 - For whitespace-only inputs, alignments use `char_index = -1` sentinel.
@@ -144,5 +151,7 @@ ts/tests/               # bun test suite
 ## Next steps
 
 - Publish `python/` via `uv publish` / PyPI, and `ts/` as `hama-js`.
-- Integrate CI to run both `uv run pytest` and `bun test`.
+- Run local split smoke checks:
+  `cd python && uv run pytest tests/test_split_assets.py -q`
+  and `cd ../ts && bun run validate:model:split`.
 - Wire up docs/examples + simple CLI wrappers if needed.

@@ -3,6 +3,10 @@ __pycache__/
 .venv/
 python/.venv/
 python/.mypy_cache/
+*.egg-info/
+python/src/*.egg-info/
+PKG-INFO
 ts/node_modules/
 ts/dist/
 ts/bun.lockb
+.DS_Store
