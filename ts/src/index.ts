@@ -319,3 +319,13 @@ const codePointOffset = (text: string, codeUnitOffset: number): number => {
   }
   return codePointIndex;
 };
+
+export {
+  ASRNodeModel,
+  decodeCtcTokens,
+} from "./asr.js";
+export type {
+  ASRNodeOptions,
+  ASRResult,
+  CTCDecodeOptions,
+} from "./asr.js";

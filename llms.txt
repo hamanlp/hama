@@ -1,153 +1,498 @@
-Project: hama – cross-platform grapheme-to-phoneme (G2P) inference runtime.
+hama Documentation Source (LLM-Ready)
+=====================================
 
-Purpose:
-- Serve end-user inference for the latest hama Korean G2P model.
-- Ship in two forms: Python package (`hama`) and TypeScript package (`hama-js`) with shared assets and multiple subpath exports (e.g., `hama-js/g2p`).
-- Provide tokenizer/jamo utilities and minimal tests to validate inference.
+Overview
+--------
+hama is a cross-platform inference library for:
+1. Grapheme-to-phoneme (G2P)
+2. Audio-to-phoneme ASR (CTC-based acoustic encoder)
 
-Shared assets:
-- `assets/g2p_fp16.onnx`: fp16 ONNX graph (same file copied into `python/src/hama/assets/` and `ts/src/assets/`).
-- ONNX graph structure:
-  * Inputs: `input_ids` (int64, [batch, src_len]) and `input_lengths` (int64, [batch]).
-  * Outputs: `decoded_ids` (int64, [batch, max_tgt_len]) and `attn_indices` (int64, [batch, max_tgt_len]) where `attn_indices[t]` is the encoder-time-step with max attention during step `t`.
-- `assets/g2p_vocab.json`: shared encoder/decoder vocabulary (also copied into package-specific asset folders).
+It ships two runtimes in one monorepo:
+- Python package: `hama`
+- TypeScript package: `hama-js`
 
-Python package (python/):
-- Requirements: Python 3.9+, `uv` for dependency management.
-- Entry point: `hama` package located at `python/src/hama` (published on PyPI as `hama`).
-- Installation:
-  * Local dev: `cd python && uv sync --extra test` (preferred) or `pip install -e .[test]`.
-  * External users: `uv pip install hama` or `pip install hama`.
+Primary goals:
+- Minimal runtime dependencies
+- Consistent outputs across Python and TypeScript
+- Embedded ONNX assets for default inference without extra setup
 
-Key modules/classes:
-1. `hama.G2PModel`
-   - Constructor keyword args:
-     * `model_path: Optional[PathLike]` (defaults to embedded `g2p_fp16.onnx`).
-     * `vocab_path: Optional[PathLike]` (defaults to embedded `g2p_vocab.json`).
-     * `providers: Optional[Sequence[str]]` (passed to onnxruntime).
-     * `max_input_len: int = 128`, `max_output_len: int = 32` (`max_output_len` retained for API compatibility; ONNX decode length is graph-defined).
-   - Methods:
-     * `predict(text: str) -> G2PResult`
-       - Runs tokenization, ONNX inference, and decoding to IPA.
-     * `predict(text: str, split_delimiter: str|Pattern|None = r"\s+", output_delimiter: str = " ") -> G2PResult`
-       - Splits input by delimiter (default all whitespace), infers per segment, and joins segment IPA outputs with `output_delimiter`.
-   - Behavior: caches `onnxruntime.InferenceSession`.
 
-2. `hama.G2PResult`
-   - Fields: `ipa: str`, `alignments: list[G2PAlignment]`.
+Repository Layout
+-----------------
+- `README.md`
+  Top-level user documentation.
+- `assets/`
+  Shared top-level vocab copy (project-level reference).
+- `examples/`
+  Root-level runnable examples.
+- `python/`
+  Python package source, tests, metadata.
+- `ts/`
+  TypeScript package source, tests, scripts, metadata.
 
-3. `hama.G2PAlignment`
-   - Fields: `phoneme: str`, `phoneme_index: int`, `char_index: int`.
-   - `char_index = -1` is a sentinel used only when input has no non-whitespace characters.
+Python package layout:
+- `python/src/hama/`
+  Core Python runtime.
+- `python/src/hama/assets/`
+  Embedded runtime assets.
+- `python/tests/`
+  pytest suite.
 
-4. Tokenization helpers:
-   - `hama.TextTokenizer` / `hama.Vocabulary`.
-   - `hama.split_text_to_jamo(text: str) -> list[str]`.
-   - `hama.join_jamo_tokens(tokens: Iterable[str]) -> str`.
-   - Alignment reconstruction: ONNX returns `attn_indices`; map each index through `position_map` (token→original-char) to emit `G2PAlignment(char_index=position_map[attn_idx], phoneme=phoneme)`.
+TypeScript package layout:
+- `ts/src/`
+  Node/Bun and browser runtime source.
+- `ts/src/assets/`
+  Embedded runtime assets.
+- `ts/tests/`
+  bun test suite.
+- `ts/scripts/`
+  Validation scripts.
 
-5. Assets module `hama.assets` exposes package resources (no public API beyond resource loading).
 
-Preprocessing behavior (important for docs):
-- Inputs are lowercased in both Python (`text.lower()`) and JS (`toLocaleLowerCase("und")`).
-- Whitespace characters are skipped during tokenization (leading/trailing/multiple whitespace do not change the token stream).
-- Alignment indices never point to whitespace characters because whitespace is not tokenized.
-- For whitespace-only input (no non-whitespace source token), alignments use sentinel `char_index = -1`.
+Shipped ONNX Assets
+-------------------
+Python and TS embed these assets under package-specific `assets/` directories:
+- `encoder.onnx`
+- `decoder_step.onnx`
+- `asr_waveform_fp16.onnx`
+- `g2p_vocab.json`
 
-Usage pattern (docs should show):
+G2P uses split ONNX by default (`encoder.onnx` + `decoder_step.onnx`).
+ASR uses exactly one packaged runtime asset: `asr_waveform_fp16.onnx`.
+That ONNX must accept `waveform` + `waveform_lengths`.
+
+
+Installation
+------------
+
+Python (recommended with uv)
+----------------------------
+Requirements:
+- Python >= 3.9
+- uv >= 0.3
+
+Local development:
+```bash
+cd python
+uv sync --extra test
+```
+
+Install from package index (when published):
+```bash
+uv pip install hama
+# or
+pip install hama
+```
+
+Optional extras:
+- `test`: pytest
+- `live`: live mic demo dependencies
+
+```bash
+uv pip install 'hama[live]'
+# installs sounddevice + silero-vad extra set
+```
+
+
+TypeScript / Bun
+----------------
+Requirements:
+- Bun >= 1.1.0 (or Node >= 18 for runtime usage)
+
+Local development:
+```bash
+cd ts
+bun install
+bun run build
+```
+
+Install from package registry (when published):
+```bash
+bun add hama-js
+# or
+npm install hama-js
+```
+
+
+Quick Start: Python G2P
+-----------------------
 ```python
 from hama import G2PModel
 
 model = G2PModel()
 result = model.predict("안녕하세요")
 print(result.ipa)
-for alignment in result.alignments:
-    print(alignment.phoneme, alignment.char_index)
+for al in result.alignments:
+    print(al.phoneme, al.char_index)
 ```
 
-Testing instructions (Python):
-```bash
-cd python
-uv sync --extra test
-uv run pytest
-# pip alternative
-pip install -e .[test]
-pytest
+
+Quick Start: Python ASR
+-----------------------
+```python
+from hama import ASRModel
+
+model = ASRModel()
+result = model.transcribe_file("sample.wav")
+print(result.phoneme_text)
+print(result.word_phoneme_text)
 ```
 
-TypeScript package (ts/):
-- Tooling: Bun 1.1+, TypeScript 5.9, `onnxruntime-node` and `onnxruntime-web`.
-- Published package name: `hama-js` on npm with subpaths (`/g2p`, `/g2p/browser`, `/jamo`, `/tokenizer`).
-- Build outputs:
-  * Node/Bun bundle: `dist/node/index.js`.
-  * Browser bundle: `dist/browser/index.js`.
-  * Type declarations: `dist/types/*.d.ts`.
-- Assets copied into `dist/node/assets/` and `dist/browser/assets/` during build.
-- Installation:
-  * Local dev: `cd ts && bun install` (preferred) or `npm install` / `yarn install`.
-  * External users: `bun add hama-js`, `npm install hama-js`, or `yarn add hama-js`.
 
-Key exports:
-1. `G2PNodeModel` (ts/src/index.ts)
-   - Static method `create(options?: { modelPath?: string; maxInputLen?: number; maxOutputLen?: number; }) -> Promise<G2PNodeModel>`.
-   - Instance method `predict(text: string, { splitDelimiter?: string|RegExp|null, outputDelimiter?: string }?) -> Promise<{ ipa: string; alignments: Alignment[] }>` where `Alignment` matches Python fields.
-   - Uses `onnxruntime-node` with BigInt tensors; loads default ONNX from packaged assets via `import.meta.url`.
-   - `maxOutputLen` is retained for API compatibility; decode length is controlled by the ONNX autoregressive graph.
-
-2. `G2PBrowserModel` (ts/src/browser.ts)
-   - Static `create({ modelUrl?, maxInputLen?, maxOutputLen? }?)` returning promise.
-   - `predict` accepts the same split/output delimiter options as Node.
-   - Uses `onnxruntime-web` and fetch API to load ONNX/vocab.
-
-3. `splitTextToJamo`, `joinJamoTokens`, tokenizer utilities mirrored from Python (ts/src/jamo.ts, ts/src/tokenizer.ts). `decodeIdsToResult` combines `decoded_ids` and `attn_indices`, and consults `positionMap` to map attention indices to original character positions (ensuring alignments match Python).
-   - TS uses code-point based `charIndex` mapping (not UTF-16 code-unit offsets), so non-BMP characters align consistently with Python semantics.
-
-Example Node usage:
+Quick Start: TS G2P (Node/Bun)
+-------------------------------
 ```ts
 import { G2PNodeModel } from "hama-js/g2p";
 
-const run = async () => {
-  const model = await G2PNodeModel.create();
-  const result = await model.predict("안녕하세요");
-  console.log(result.ipa, result.alignments);
-};
-
-run().catch(console.error);
+const model = await G2PNodeModel.create();
+const out = await model.predict("안녕하세요");
+console.log(out.ipa, out.alignments);
 ```
 
-Browser example:
+
+Quick Start: TS ASR (Node/Bun)
+------------------------------
+```ts
+import { ASRNodeModel } from "hama-js/asr";
+
+const model = await ASRNodeModel.create();
+const out = await model.transcribeWavFile("sample.wav");
+console.log(out.phonemeText);
+```
+
+
+Quick Start: Browser G2P
+------------------------
+Browser runtime currently supports G2P.
 ```ts
 import { G2PBrowserModel } from "hama-js/g2p/browser";
 
 const model = await G2PBrowserModel.create();
-const result = await model.predict("안녕하세요");
+const out = await model.predict("안녕하세요");
+console.log(out.ipa);
 ```
 
-Build/test commands (TypeScript):
+
+Python API Reference
+====================
+
+Core exports from `hama`
+------------------------
+- `G2PModel`
+- `G2PResult`
+- `G2PAlignment`
+- `ASRModel`
+- `ASRResult`
+- `ASRDecodeConfig`
+- `decode_ctc_tokens`
+- `read_wav_mono`
+- `split_text_to_jamo`
+- `join_jamo_tokens`
+- `TextTokenizer`
+- `Vocabulary`
+
+
+G2PModel
+--------
+Constructor:
+- `G2PModel(model_path=None, encoder_model_path=None, decoder_step_model_path=None, vocab_path=None, max_input_len=128, max_output_len=32, providers=None)`
+
+Behavior:
+- Uses split ONNX when encoder+decoder-step assets are available.
+- Falls back to single-file model path when explicitly provided.
+
+Inference:
+- `predict(text, split_delimiter=r"\s+", output_delimiter=" ") -> G2PResult`
+- `__call__` delegates to `predict`
+
+Output (`G2PResult`):
+- `ipa: str`
+- `alignments: list[G2PAlignment]`
+
+Alignment (`G2PAlignment`):
+- `phoneme: str`
+- `phoneme_index: int`
+- `char_index: int`
+
+Notes:
+- Whitespace is ignored during tokenization.
+- For whitespace-only input, alignment uses sentinel `char_index = -1`.
+
+
+ASRModel
+--------
+Constructor:
+- `ASRModel(model_path=None, vocab_path=None, decode=None, providers=None, model_sample_rate=16000)`
+
+Decode config (`ASRDecodeConfig`):
+- `blank_token="<blank>"`
+- `word_boundary_token="<wb>"`
+- `unk_token="<unk>"`
+- `blank_bias=-0.1` (training-aligned default)
+- `unk_bias=0.0`
+- `collapse_repeats=True`
+
+Inference methods:
+- `transcribe_file(wav_path) -> ASRResult`
+- `transcribe_waveform(waveform, sample_rate) -> ASRResult`
+- `__call__(waveform, sample_rate) -> ASRResult`
+
+Model contract:
+- Packaged default asset name: `asr_waveform_fp16.onnx`
+- Required ONNX inputs: `waveform`, `waveform_lengths`
+- Required ONNX outputs: `log_probs`, `out_lengths`
+- hama ASR is waveform-only; there is no public feature-input path
+
+Output (`ASRResult`):
+- `phonemes: list[str]`
+- `phoneme_text: str`
+- `word_phoneme_text: str`
+- `token_ids: list[int]`              (collapsed non-blank token ids)
+- `frame_token_ids: list[int]`        (argmax per frame)
+- `num_frames: int`
+
+WAV support (Python):
+- mono/stereo WAV
+- PCM 8/16/24/32-bit integer
+- PCM float32 WAV
+
+
+TypeScript API Reference
+========================
+
+Node/Bun exports
+----------------
+From `hama-js` (root) and subpaths:
+- `hama-js/g2p` -> G2P node runtime
+- `hama-js/asr` -> ASR node runtime
+- `hama-js/g2p/browser` -> browser G2P runtime
+
+Core TS exports:
+- `G2PNodeModel`
+- `ASRNodeModel`
+- `decodeCtcTokens`
+- tokenizer/jamo helpers
+
+
+G2PNodeModel
+------------
+Create:
+- `G2PNodeModel.create({ modelPath?, encoderModelPath?, decoderStepModelPath?, maxInputLen?, maxOutputLen? })`
+
+Predict:
+- `predict(text, { splitDelimiter?, outputDelimiter? })`
+
+Output:
+- `{ ipa: string, alignments: Alignment[] }`
+
+
+ASRNodeModel
+------------
+Create:
+- `ASRNodeModel.create({ modelPath?, vocabPath?, sampleRate?, blankToken?, unkToken?, wordBoundaryToken?, blankBias?, unkBias?, collapseRepeats? })`
+
+Inference methods:
+- `transcribeWavFile(path)`
+- `transcribeWaveform(samples, sampleRate)`
+
+Output (`ASRResult`):
+- `phonemes: string[]`
+- `phonemeText: string`
+- `wordPhonemeText: string`
+- `tokenIds: number[]`
+- `frameTokenIds: number[]`
+- `numFrames: number`
+
+Design choice:
+- TS ASR is waveform-only and expects a waveform-input ONNX.
+- No additional third-party DSP packages were introduced.
+
+WAV support (TS):
+- PCM int WAV: 8/16/24/32-bit
+- float WAV: 32-bit
+- Multi-channel is mixed to mono.
+
+
+Decoding Semantics
+==================
+
+G2P
+---
+- Decoder emits token ids + attention argmax indices.
+- Attention argmax maps phoneme back to input character index through tokenizer position map.
+
+ASR (CTC)
+---------
+- Argmax over frame logits.
+- Optional blank bias applied before argmax.
+- CTC post-process:
+  1. Collapse repeats (configurable)
+  2. Remove blank token
+  3. Split words at `<wb>`
+
+TS helper:
+- `decodeCtcTokens(frameTokenIds, decoderTokens, options)`
+
+Python helper:
+- `decode_ctc_tokens(frame_token_ids, decoder_tokens, blank_id=..., word_boundary_token=...)`
+
+
+Examples
+========
+
+`examples/python_asr.py`
+------------------------
+- Basic ASR usage from WAV or synthetic tone.
+
+`examples/python_live_asr_silero_vad.py`
+----------------------------------------
+- Live mic capture using `sounddevice`
+- Voice activity segmentation using `silero-vad==6.2.0`
+- ASR phoneme output per utterance
+
+Run live example:
+```bash
+cd python
+uv sync --extra test
+uv run pip install sounddevice "silero-vad==6.2.0"
+uv run python ../examples/python_live_asr_silero_vad.py
+```
+
+Default VAD policy:
+- Silero speech threshold `0.6`
+- Dynamic silence duration:
+  - `<3s`: `1000ms`
+  - `5s`: `500ms`
+  - `12s`: `200ms`
+  - `17s`: `100ms`
+  - `>17s`: immediate flush
+
+`ts/scripts/live-asr-silero.ts`
+-------------------------------
+- TS/Node live mic example using Silero VAD bindings.
+- Optional example dependencies:
+  - `@ricky0123/vad-node`
+  - `node-record-lpcm16`
+
+Run TS live example:
+```bash
+cd ts
+bun add -d @ricky0123/vad-node node-record-lpcm16
+# macOS recorder dependency:
+brew install sox
+bun run live:asr:silero
+# explicit recorder program override:
+bun run live:asr:silero --record-program sox
+```
+
+Default TS live VAD policy:
+- Silero speech threshold `0.6`
+- Dynamic silence duration:
+  - `<3s`: `1000ms`
+  - `5s`: `500ms`
+  - `12s`: `200ms`
+  - `17s`: `100ms`
+  - `>17s`: immediate flush
+
+
+Build, Test, Validate
+=====================
+
+Python
+------
+```bash
+cd python
+uv sync --extra test
+uv run pytest
+uv run pytest tests/test_asr.py -q
+uv run pytest tests/test_split_assets.py -q
+```
+
+TypeScript
+----------
 ```bash
 cd ts
 bun install
 bun run build
 bun test
-# npm alternative
-npm install
-npm run build
-npm test
+bun test tests/asr.test.ts
+bun run validate:model:split
+bun run validate:asr
 ```
 
-Testing expectations:
-- `ts/tests/g2p.test.ts` asserts `G2PNodeModel` returns non-empty IPA, alignments exist, and alignments map to non-whitespace indices.
-- `ts/tests/jamo.test.ts` ensures jamo helpers round-trip Hangul.
-- Python tests: `python/tests/test_inference.py` (default assets), `python/tests/test_jamo.py`.
+Note:
+- Some Bun versions may panic after test completion even when tests pass.
+- Consider test pass/fail lines first, then Bun process panic as a runtime issue.
 
-Other notes:
-- README includes setup instructions and example scripts (`python/example.py`, `ts/example.js`).
-- Both runtimes rely on shared vocabulary to map encoder tokens to phonemes.
-- Alignment extraction is attention argmax-driven; identical logic in both languages.
 
-Doc goals for LLM:
-- Provide overview of architecture (shared assets, dual runtimes).
-- Document installation/setup per language.
-- Explain API surface (classes, methods, return types, options).
-- Include usage snippets for Python, Node, browser.
-- Mention how to run tests and regenerate assets.
+Publishing Notes
+================
+
+Python package (`python/pyproject.toml`)
+----------------------------------------
+- Name: `hama`
+- Python >= 3.9
+- Core deps: `numpy`, `onnxruntime`
+- Extras:
+  - `test`
+  - `live`
+- Package data includes ONNX + JSON assets via setuptools config.
+
+TypeScript package (`ts/package.json`)
+--------------------------------------
+- Name: `hama-js`
+- Node engine >= 18, Bun >= 1.1
+- Exports include:
+  - root
+  - `./g2p`
+  - `./asr`
+  - browser and utility subpaths
+- Files include `dist/` only (keeps publish artifact small)
+
+
+Troubleshooting
+===============
+
+1) ONNX load failure
+- Ensure assets are present in packaged `assets/` directory.
+- Verify ONNX runtime version compatibility.
+
+2) No phoneme output from ASR
+- Check that input sample rate matches the model expectation (default 16k).
+- For TS waveform mode, ensure the WAV is supported format.
+- Try adjusting `blankBias` slightly negative to reduce blank over-selection.
+
+3) Poor live mic segmentation
+- Increase `--silence-ms-to-flush`.
+- Lower `--vad-threshold` slightly.
+- Ensure mic gain/noise floor are reasonable.
+
+4) Bun crash after tests
+- Known Bun runtime issue can occur after successful test execution.
+- Use test output lines to confirm actual pass/fail status.
+
+
+Doc-Site Page Suggestions
+=========================
+
+Recommended docs IA for a full website:
+1. Home
+2. Installation
+   - Python
+   - TypeScript
+3. Quickstarts
+   - Python G2P
+   - Python ASR
+   - TS G2P
+   - TS ASR
+4. API Reference
+   - Python API
+   - TS API
+5. Models & Assets
+6. Decoding & Alignment Semantics
+7. Live Streaming Example (Silero VAD)
+8. Testing & Validation
+9. Troubleshooting
+10. Release/Publishing Guide
+
+This `llms.txt` is intentionally structured so an LLM can generate all pages directly.
