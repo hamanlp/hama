@@ -3,7 +3,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { InferenceSession, Tensor } from "onnxruntime-node";
 
-import { decodeIdsToResult, decoderIds, encodeText, G2PResult } from "./tokenizer.js";
+import {
+  buildDisplayIpa,
+  decodeIdsToResult,
+  decoderIds,
+  encodeText,
+  G2PResult,
+  prepareTextForPrediction,
+  PreserveLiteralsMode,
+} from "./tokenizer.js";
 
 export interface G2POptions {
   modelPath?: string;
@@ -16,6 +24,7 @@ export interface G2POptions {
 export interface PredictOptions {
   splitDelimiter?: string | RegExp | null;
   outputDelimiter?: string;
+  preserveLiterals?: PreserveLiteralsMode;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -107,22 +116,30 @@ export class G2PNodeModel {
   async predict(text: string, options: PredictOptions = {}): Promise<G2PResult> {
     const splitDelimiter = options.splitDelimiter ?? /\s+/u;
     const outputDelimiter = options.outputDelimiter ?? " ";
+    const preserveLiterals = options.preserveLiterals ?? "none";
     const segments = splitSegments(text, splitDelimiter);
     if (segments.length === 0) {
-      return this.predictSingle(text, 0);
+      return this.predictSingle(text, 0, preserveLiterals);
     }
 
     const results = await Promise.all(
       segments.map(async (segment) =>
-        this.predictSingle(segment.text, codePointOffset(text, segment.startCodeUnit)),
+        this.predictSingle(
+          segment.text,
+          codePointOffset(text, segment.startCodeUnit),
+          preserveLiterals,
+        ),
       ),
     );
 
     const ipaParts: string[] = [];
+    const displayParts: string[] = [];
     const alignments: G2PResult["alignments"] = [];
     for (let i = 0; i < results.length; i++) {
       if (i > 0) ipaParts.push(outputDelimiter);
+      if (i > 0) displayParts.push(outputDelimiter);
       ipaParts.push(results[i].ipa);
+      displayParts.push(results[i].displayIpa);
       for (const alignment of results[i].alignments) {
         alignments.push({
           phoneme: alignment.phoneme,
@@ -131,17 +148,30 @@ export class G2PNodeModel {
         });
       }
     }
-    return { ipa: ipaParts.join(""), alignments };
+    return { ipa: ipaParts.join(""), displayIpa: displayParts.join(""), alignments };
   }
 
-  private async predictSingle(text: string, baseCharIndex: number): Promise<G2PResult> {
+  private async predictSingle(
+    text: string,
+    baseCharIndex: number,
+    preserveLiterals: PreserveLiteralsMode,
+  ): Promise<G2PResult> {
+    const prepared = prepareTextForPrediction(text, preserveLiterals);
+    if (preserveLiterals === "punct" && !/\S/u.test(prepared.modelText)) {
+      return {
+        ipa: "",
+        displayIpa: Array.from(text).filter((ch) => /\p{P}/u.test(ch)).join(""),
+        alignments: [],
+      };
+    }
+
     if (this.encoderSession && this.decoderStepSession) {
-      return this.predictSingleSplit(text, baseCharIndex);
+      return this.predictSingleSplit(prepared.modelText, text, prepared.charIndexMap, baseCharIndex, preserveLiterals);
     }
     if (!this.session) {
       throw new Error("No ONNX session initialized");
     }
-    const encoded = encodeText(text, this.maxInputLen);
+    const encoded = encodeText(prepared.modelText, this.maxInputLen);
     const inputIds = new BigInt64Array(encoded.ids);
     const inputLengths = new BigInt64Array([BigInt(encoded.length || 1)]);
 
@@ -153,10 +183,22 @@ export class G2PNodeModel {
     const outputs = await this.session.run(feeds);
     const decoded = outputs.decoded_ids.data as BigInt64Array;
     const attn = outputs.attn_indices.data as BigInt64Array;
-    const result = decodeIdsToResult(decoded, attn, encoded.positionMap);
+    const rawResult = decodeIdsToResult(decoded, attn, encoded.positionMap);
+    const relativeAlignments = rawResult.alignments.map((alignment, idx) => ({
+      phoneme: alignment.phoneme,
+      phonemeIndex: idx,
+      charIndex:
+        alignment.charIndex >= 0 && alignment.charIndex < prepared.charIndexMap.length
+          ? prepared.charIndexMap[alignment.charIndex]
+          : -1,
+    }));
     return {
-      ipa: result.ipa,
-      alignments: result.alignments.map((alignment, idx) => ({
+      ipa: rawResult.ipa,
+      displayIpa:
+        preserveLiterals === "punct"
+          ? buildDisplayIpa(rawResult.ipa, relativeAlignments, text)
+          : rawResult.ipa,
+      alignments: relativeAlignments.map((alignment, idx) => ({
         phoneme: alignment.phoneme,
         phonemeIndex: idx,
         charIndex:
@@ -165,7 +207,13 @@ export class G2PNodeModel {
     };
   }
 
-  private async predictSingleSplit(text: string, baseCharIndex: number): Promise<G2PResult> {
+  private async predictSingleSplit(
+    text: string,
+    originalText: string,
+    charIndexMap: number[],
+    baseCharIndex: number,
+    preserveLiterals: PreserveLiteralsMode,
+  ): Promise<G2PResult> {
     if (!this.encoderSession || !this.decoderStepSession) {
       throw new Error("Split ONNX sessions are not initialized");
     }
@@ -249,10 +297,22 @@ export class G2PNodeModel {
       }
     }
 
-    const result = decodeIdsToResult(decoded, attnIndices, encoded.positionMap);
+    const rawResult = decodeIdsToResult(decoded, attnIndices, encoded.positionMap);
+    const relativeAlignments = rawResult.alignments.map((alignment, idx) => ({
+      phoneme: alignment.phoneme,
+      phonemeIndex: idx,
+      charIndex:
+        alignment.charIndex >= 0 && alignment.charIndex < charIndexMap.length
+          ? charIndexMap[alignment.charIndex]
+          : -1,
+    }));
     return {
-      ipa: result.ipa,
-      alignments: result.alignments.map((alignment, idx) => ({
+      ipa: rawResult.ipa,
+      displayIpa:
+        preserveLiterals === "punct"
+          ? buildDisplayIpa(rawResult.ipa, relativeAlignments, originalText)
+          : rawResult.ipa,
+      alignments: relativeAlignments.map((alignment, idx) => ({
         phoneme: alignment.phoneme,
         phonemeIndex: idx,
         charIndex:

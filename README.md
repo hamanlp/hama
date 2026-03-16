@@ -3,7 +3,7 @@
 This repository packages hama inference runtimes. It ships:
 
 - a Python package built with `uv`, powered by ONNX Runtime
-- a Bun/TypeScript package that runs under Node.js/Bun (and browser for G2P)
+- a Bun/TypeScript package that runs under Node.js/Bun and in browsers
 - shared tokenizer + Hangul jamo helpers
 - a waveform-input phoneme ASR runtime over exported ONNX
 - reproducible tests for both runtimes
@@ -39,8 +39,9 @@ from hama import G2PModel
 
 def main() -> None:
     model = G2PModel()
-    result = model.predict("안녕하세요")
+    result = model.predict("Really? What's the orbital velocity of the moon?", preserve_literals="punct")
     print("IPA:", result.ipa)
+    print("Display IPA:", result.display_ipa)
     print("Alignments:", result.alignments)
 
 
@@ -85,10 +86,12 @@ This is example-only; no new runtime dependencies were added to `hama`.
 The public API lives in `hama.__init__`:
 
 - `split_text_to_jamo` / `join_jamo_tokens` – reversible Hangul disassembly
-- `G2PModel.predict(text)` – returns IPA string plus `phoneme -> char_index`
-  alignments derived from attention weights
-- `predict(..., split_delimiter=r"\s+", output_delimiter=" ")` can segment input
-  before inference and join segment IPA outputs with a delimiter
+- `G2PModel.predict(text)` – returns canonical IPA, a display-friendly IPA string,
+  and `phoneme -> char_index` alignments derived from attention weights
+- `predict(..., split_delimiter=r"\s+", output_delimiter=" ", preserve_literals="none" | "punct")`
+  can segment input before inference, join segment IPA outputs with a delimiter,
+  and optionally preserve punctuation in `result.display_ipa` without changing
+  canonical `result.ipa`
 - `char_index` is `-1` only for whitespace-only input
 - `ASRModel.transcribe_file(path)` / `ASRModel.transcribe_waveform(waveform, sample_rate)`
   return collapsed phoneme output from `asr_waveform_fp16.onnx`
@@ -111,6 +114,8 @@ bun test
 bun test tests/asr.test.ts
 bun run validate:model:split
 bun run validate:asr
+bun run validate:browser
+bun run validate:browser:asr
 
 # Install published package (instead of local dist/)
 bun add hama-js
@@ -142,8 +147,11 @@ import { G2PNodeModel } from "./dist/node/index.js";
 
 const run = async () => {
     const model = await G2PNodeModel.create();
-    const result = await model.predict("안녕하세요");
+    const result = await model.predict("Really? What's the orbital velocity of the moon?", {
+        preserveLiterals: "punct",
+    });
     console.log("IPA:", result.ipa);
+    console.log("Display IPA:", result.displayIpa);
     console.log("Alignments:", result.alignments);
 };
 
@@ -168,8 +176,10 @@ import { G2PNodeModel } from "hama-js/g2p";
 API overview:
 
 - `G2PNodeModel.create({ modelPath?, encoderModelPath?, decoderStepModelPath?, maxInputLen?, maxOutputLen? })`
-- `model.predict(text, { splitDelimiter?: /\s+/u by default, outputDelimiter?: " " })`
-  → `{ ipa, alignments }`
+- `model.predict(text, { splitDelimiter?: /\s+/u by default, outputDelimiter?: " ", preserveLiterals?: "none" | "punct" })`
+  → `{ ipa, displayIpa, alignments }`
+- `displayIpa` preserves punctuation only when requested; canonical `ipa` stays
+  punctuation-free
 - `alignments[].charIndex` is `-1` only for whitespace-only input
 - `ASRNodeModel.create({ modelPath?, vocabPath?, sampleRate?, blankToken?, unkToken?, wordBoundaryToken?, blankBias?, unkBias? })`
 - `model.transcribeWavFile(path)` and `model.transcribeWaveform(samples, sampleRate)` for zero-dependency WAV/waveform inference
@@ -178,12 +188,19 @@ API overview:
 - `ASRResult`
   → `{ phonemes, phonemeText, wordPhonemeText, tokenIds, frameTokenIds, numFrames }`
 - `decodeCtcTokens(...)` is exported for deterministic CTC post-processing tests
-- Browser bundle: `import { G2PBrowserModel } from "hama-js/g2p/browser";`
-  with `G2PBrowserModel.create({ modelUrl?, encoderUrl?, decoderStepUrl?, ... })`
+- Browser bundle:
+  - `import { G2PBrowserModel } from "hama-js/g2p/browser";`
+  - `import { ASRBrowserModel } from "hama-js/asr/browser";`
+  - `import { G2PBrowserModel, ASRBrowserModel } from "hama-js/browser";`
+  - `G2PBrowserModel.create({ modelUrl?, encoderUrl?, decoderStepUrl?, ... })`
+  - `ASRBrowserModel.create({ modelUrl?, vocabUrl?, sampleRate?, blankToken?, unkToken?, wordBoundaryToken?, blankBias?, unkBias?, collapseRepeats? })`
 
 The package copies `assets/*.onnx` + `g2p_vocab.json` into `dist` so Node/Bun
 resolves them via `import.meta.url`. For browser deployments, host the ONNX
-assets next to the bundle (default URLs resolve relative to the built module).
+assets next to the bundle (default URLs resolve relative to the built module),
+and pass `vocabUrl` when you want a browser-specific decoder vocab JSON.
+
+Release notes live in [`CHANGELOG.md`](/Users/seongmin/hama/CHANGELOG.md).
 
 ## Shared design notes
 

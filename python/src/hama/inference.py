@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 import re
-from typing import List, Pattern, Sequence
+from typing import List, Literal, Pattern, Sequence
+import unicodedata
 
 import numpy as np
 import onnxruntime as ort
@@ -29,6 +30,7 @@ class G2PAlignment:
 @dataclass
 class G2PResult:
     ipa: str
+    display_ipa: str
     alignments: List[G2PAlignment]
 
 
@@ -106,11 +108,13 @@ class G2PModel:
         text: str,
         split_delimiter: str | Pattern[str] | None = r"\s+",
         output_delimiter: str = " ",
+        preserve_literals: Literal["none", "punct"] = "none",
     ) -> G2PResult:
         return self.predict(
             text=text,
             split_delimiter=split_delimiter,
             output_delimiter=output_delimiter,
+            preserve_literals=preserve_literals,
         )
 
     def predict(
@@ -118,22 +122,36 @@ class G2PModel:
         text: str,
         split_delimiter: str | Pattern[str] | None = r"\s+",
         output_delimiter: str = " ",
+        preserve_literals: Literal["none", "punct"] = "none",
     ) -> G2PResult:
+        if preserve_literals not in {"none", "punct"}:
+            raise ValueError("preserve_literals must be 'none' or 'punct'")
         segments = self._segment_text(text=text, split_delimiter=split_delimiter)
         if not segments:
-            return self._predict_single(text=text, base_char_index=0)
+            return self._predict_single(
+                text=text,
+                base_char_index=0,
+                preserve_literals=preserve_literals,
+            )
 
         segment_results = [
-            self._predict_single(text=segment_text, base_char_index=segment_start)
+            self._predict_single(
+                text=segment_text,
+                base_char_index=segment_start,
+                preserve_literals=preserve_literals,
+            )
             for segment_text, segment_start in segments
         ]
 
         ipa_parts: List[str] = []
+        display_parts: List[str] = []
         alignments: List[G2PAlignment] = []
         for idx, segment_result in enumerate(segment_results):
             if idx > 0:
                 ipa_parts.append(output_delimiter)
+                display_parts.append(output_delimiter)
             ipa_parts.append(segment_result.ipa)
+            display_parts.append(segment_result.display_ipa)
             for alignment in segment_result.alignments:
                 alignments.append(
                     G2PAlignment(
@@ -142,12 +160,61 @@ class G2PModel:
                         char_index=alignment.char_index,
                     )
                 )
-        return G2PResult(ipa="".join(ipa_parts), alignments=alignments)
+        return G2PResult(
+            ipa="".join(ipa_parts),
+            display_ipa="".join(display_parts),
+            alignments=alignments,
+        )
 
-    def _predict_single(self, text: str, base_char_index: int) -> G2PResult:
+    def _predict_single(
+        self,
+        text: str,
+        base_char_index: int,
+        preserve_literals: Literal["none", "punct"],
+    ) -> G2PResult:
+        prepared = _prepare_text_for_prediction(text, preserve_literals)
+        if preserve_literals == "punct" and not any(not ch.isspace() for ch in prepared.model_text):
+            return G2PResult(
+                ipa="",
+                display_ipa="".join(ch for ch in text if _is_punctuation(ch)),
+                alignments=[],
+            )
+
         if self.encoder_session is not None and self.decoder_step_session is not None:
-            return self._predict_single_split(text=text, base_char_index=base_char_index)
-        return self._predict_single_legacy(text=text, base_char_index=base_char_index)
+            raw_result = self._predict_single_split(text=prepared.model_text, base_char_index=0)
+        else:
+            raw_result = self._predict_single_legacy(text=prepared.model_text, base_char_index=0)
+
+        relative_alignments = [
+            G2PAlignment(
+                phoneme=alignment.phoneme,
+                phoneme_index=alignment.phoneme_index,
+                char_index=(
+                    prepared.char_index_map[alignment.char_index]
+                    if 0 <= alignment.char_index < len(prepared.char_index_map)
+                    else -1
+                ),
+            )
+            for alignment in raw_result.alignments
+        ]
+        adjusted_alignments = [
+            G2PAlignment(
+                phoneme=alignment.phoneme,
+                phoneme_index=alignment.phoneme_index,
+                char_index=(
+                    alignment.char_index
+                    if alignment.char_index < 0
+                    else alignment.char_index + base_char_index
+                ),
+            )
+            for alignment in relative_alignments
+        ]
+        display_ipa = (
+            _build_display_ipa(raw_result.ipa, relative_alignments, text)
+            if preserve_literals == "punct"
+            else raw_result.ipa
+        )
+        return G2PResult(ipa=raw_result.ipa, display_ipa=display_ipa, alignments=adjusted_alignments)
 
     def _predict_single_legacy(self, text: str, base_char_index: int) -> G2PResult:
         encoding = self.tokenizer.encode(text)
@@ -171,7 +238,11 @@ class G2PModel:
             )
             for alignment in alignments
         ]
-        return G2PResult(ipa="".join(phonemes), alignments=adjusted_alignments)
+        return G2PResult(
+            ipa="".join(phonemes),
+            display_ipa="".join(phonemes),
+            alignments=adjusted_alignments,
+        )
 
     def _predict_single_split(self, text: str, base_char_index: int) -> G2PResult:
         if self.encoder_session is None or self.decoder_step_session is None:  # pragma: no cover
@@ -246,7 +317,11 @@ class G2PModel:
             )
             for alignment in alignments
         ]
-        return G2PResult(ipa="".join(phonemes), alignments=adjusted_alignments)
+        return G2PResult(
+            ipa="".join(phonemes),
+            display_ipa="".join(phonemes),
+            alignments=adjusted_alignments,
+        )
 
     def _ensure_split_name_maps(self) -> None:
         if self.encoder_session is None or self.decoder_step_session is None:  # pragma: no cover
@@ -340,3 +415,52 @@ class G2PModel:
             )
             phonemes.append(phoneme)
         return phonemes, alignments
+
+
+@dataclass
+class _PreparedText:
+    model_text: str
+    char_index_map: List[int]
+
+
+def _is_punctuation(ch: str) -> bool:
+    return unicodedata.category(ch).startswith("P")
+
+
+def _prepare_text_for_prediction(
+    text: str,
+    preserve_literals: Literal["none", "punct"],
+) -> _PreparedText:
+    if preserve_literals == "none":
+        return _PreparedText(model_text=text, char_index_map=list(range(len(text))))
+
+    model_chars: List[str] = []
+    char_index_map: List[int] = []
+    for idx, ch in enumerate(text):
+        if _is_punctuation(ch):
+            continue
+        model_chars.append(ch)
+        char_index_map.append(idx)
+    return _PreparedText(model_text="".join(model_chars), char_index_map=char_index_map)
+
+
+def _build_display_ipa(
+    ipa: str,
+    alignments: Sequence[G2PAlignment],
+    original_text: str,
+) -> str:
+    punctuation = [(idx, ch) for idx, ch in enumerate(original_text) if _is_punctuation(ch)]
+    if not punctuation:
+        return ipa
+
+    parts: List[str] = []
+    punct_idx = 0
+    for alignment in alignments:
+        while punct_idx < len(punctuation) and punctuation[punct_idx][0] < alignment.char_index:
+            parts.append(punctuation[punct_idx][1])
+            punct_idx += 1
+        parts.append(alignment.phoneme)
+    while punct_idx < len(punctuation):
+        parts.append(punctuation[punct_idx][1])
+        punct_idx += 1
+    return "".join(parts)

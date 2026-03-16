@@ -7,6 +7,7 @@ def test_inference_runs_with_default_assets():
     model = G2PModel()
     result = model.predict("안녕하세요")
     assert result.ipa
+    assert result.display_ipa == result.ipa
     assert len(result.alignments) > 0
     assert all(al.char_index >= 0 for al in result.alignments)
     assert "".join(al.phoneme for al in result.alignments).startswith(result.ipa[: len(result.alignments)])
@@ -76,3 +77,24 @@ def test_custom_split_delimiter_is_applied():
     model = G2PModel()
     result = model.predict("hello,world", split_delimiter=",", output_delimiter=" | ")
     assert " | " in result.ipa
+
+
+def test_preserve_literals_keeps_punctuation_out_of_model_input_but_in_display_output():
+    model = G2PModel()
+    base = model.predict("hello")
+    punct = model.predict("hello!", preserve_literals="punct")
+    assert punct.ipa == base.ipa
+    assert punct.display_ipa.endswith("!")
+    assert "!" not in punct.ipa
+
+
+def test_preserve_literals_does_not_preserve_split_delimiter_as_punctuation():
+    model = G2PModel()
+    result = model.predict(
+        "hello,world",
+        split_delimiter=",",
+        output_delimiter=" | ",
+        preserve_literals="punct",
+    )
+    assert " | " in result.display_ipa
+    assert "," not in result.display_ipa

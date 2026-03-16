@@ -1,6 +1,6 @@
 {
   "name": "hama-js",
-  "version": "1.3.4",
+  "version": "1.3.6",
   "description": "ONNX-powered G2P + phoneme-ASR inference for Node, Bun, and browsers.",
   "homepage": "https://hamalnp.org",
   "repository": {
@@ -37,6 +37,10 @@
       "import": "./dist/browser/index.js",
       "types": "./dist/types/browser.d.ts"
     },
+    "./asr/browser": {
+      "import": "./dist/browser/index.js",
+      "types": "./dist/types/browser.d.ts"
+    },
     "./jamo": {
       "import": "./dist/node/jamo.js",
       "types": "./dist/types/jamo.d.ts"
@@ -69,6 +73,9 @@
       "g2p/browser": [
         "dist/types/browser.d.ts"
       ],
+      "asr/browser": [
+        "dist/types/browser.d.ts"
+      ],
       "browser": [
         "dist/types/browser.d.ts"
       ],
@@ -88,6 +95,8 @@
     "validate:model": "bun run scripts/validate-model.ts",
     "validate:model:split": "bun run scripts/validate-split-model.ts",
     "validate:asr": "bun run scripts/validate-asr-model.ts",
+    "validate:browser": "bun run scripts/validate-browser-model.ts",
+    "validate:browser:asr": "bun run scripts/validate-browser-asr-model.ts",
     "live:asr:silero": "bun run scripts/live-asr-silero.ts"
   },
   "files": [

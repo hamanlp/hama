@@ -28,8 +28,11 @@ export interface Alignment {
 
 export interface G2PResult {
   ipa: string;
+  displayIpa: string;
   alignments: Alignment[];
 }
+
+export type PreserveLiteralsMode = "none" | "punct";
 
 export interface EncodedText {
   ids: bigint[];
@@ -106,5 +109,76 @@ export const decodeIdsToResult = (
     );
   }
 
-  return { ipa: phonemes.join(""), alignments };
+  return { ipa: phonemes.join(""), displayIpa: phonemes.join(""), alignments };
+};
+
+export interface PreparedPredictionText {
+  modelText: string;
+  charIndexMap: number[];
+}
+
+const isPunctuation = (ch: string): boolean => /\p{P}/u.test(ch);
+
+const codePointsWithIndices = (text: string): Array<{ ch: string; charIndex: number }> => {
+  const result: Array<{ ch: string; charIndex: number }> = [];
+  let offset = 0;
+  let charIndex = 0;
+  while (offset < text.length) {
+    const code = text.codePointAt(offset)!;
+    const ch = String.fromCodePoint(code);
+    result.push({ ch, charIndex });
+    offset += ch.length;
+    charIndex += 1;
+  }
+  return result;
+};
+
+export const prepareTextForPrediction = (
+  text: string,
+  preserveLiterals: PreserveLiteralsMode,
+): PreparedPredictionText => {
+  if (preserveLiterals === "none") {
+    return {
+      modelText: text,
+      charIndexMap: codePointsWithIndices(text).map(({ charIndex }) => charIndex),
+    };
+  }
+
+  const modelChars: string[] = [];
+  const charIndexMap: number[] = [];
+  for (const { ch, charIndex } of codePointsWithIndices(text)) {
+    if (isPunctuation(ch)) continue;
+    modelChars.push(ch);
+    charIndexMap.push(charIndex);
+  }
+  return { modelText: modelChars.join(""), charIndexMap };
+};
+
+export const buildDisplayIpa = (
+  ipa: string,
+  alignments: Alignment[],
+  originalText: string,
+): string => {
+  const punctuation = codePointsWithIndices(originalText)
+    .map(({ ch, charIndex }) => ({ ch, idx: charIndex }))
+    .filter(({ ch }) => isPunctuation(ch));
+  if (punctuation.length === 0) return ipa;
+
+  const parts: string[] = [];
+  let punctIdx = 0;
+  for (const alignment of alignments) {
+    while (
+      punctIdx < punctuation.length &&
+      punctuation[punctIdx].idx < alignment.charIndex
+    ) {
+      parts.push(punctuation[punctIdx].ch);
+      punctIdx += 1;
+    }
+    parts.push(alignment.phoneme);
+  }
+  while (punctIdx < punctuation.length) {
+    parts.push(punctuation[punctIdx].ch);
+    punctIdx += 1;
+  }
+  return parts.join("");
 };

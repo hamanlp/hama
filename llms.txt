@@ -120,8 +120,9 @@ Quick Start: Python G2P
 from hama import G2PModel
 
 model = G2PModel()
-result = model.predict("안녕하세요")
+result = model.predict("Really? What's the orbital velocity of the moon?", preserve_literals="punct")
 print(result.ipa)
+print(result.display_ipa)
 for al in result.alignments:
     print(al.phoneme, al.char_index)
 ```
@@ -145,8 +146,10 @@ Quick Start: TS G2P (Node/Bun)
 import { G2PNodeModel } from "hama-js/g2p";
 
 const model = await G2PNodeModel.create();
-const out = await model.predict("안녕하세요");
-console.log(out.ipa, out.alignments);
+const out = await model.predict("Really? What's the orbital velocity of the moon?", {
+  preserveLiterals: "punct",
+});
+console.log(out.ipa, out.displayIpa, out.alignments);
 ```
 
 
@@ -163,13 +166,25 @@ console.log(out.phonemeText);
 
 Quick Start: Browser G2P
 ------------------------
-Browser runtime currently supports G2P.
 ```ts
 import { G2PBrowserModel } from "hama-js/g2p/browser";
 
 const model = await G2PBrowserModel.create();
 const out = await model.predict("안녕하세요");
 console.log(out.ipa);
+```
+
+
+Quick Start: Browser ASR
+------------------------
+```ts
+import { ASRBrowserModel } from "hama-js/asr/browser";
+
+const model = await ASRBrowserModel.create({
+  modelUrl: "/assets/asr_waveform_fp16.onnx",
+});
+const out = await model.transcribeWaveform(float32Samples, 16000);
+console.log(out.phonemeText);
 ```
 
 
@@ -202,11 +217,12 @@ Behavior:
 - Falls back to single-file model path when explicitly provided.
 
 Inference:
-- `predict(text, split_delimiter=r"\s+", output_delimiter=" ") -> G2PResult`
+- `predict(text, split_delimiter=r"\s+", output_delimiter=" ", preserve_literals="none" | "punct") -> G2PResult`
 - `__call__` delegates to `predict`
 
 Output (`G2PResult`):
 - `ipa: str`
+- `display_ipa: str`
 - `alignments: list[G2PAlignment]`
 
 Alignment (`G2PAlignment`):
@@ -217,6 +233,9 @@ Alignment (`G2PAlignment`):
 Notes:
 - Whitespace is ignored during tokenization.
 - For whitespace-only input, alignment uses sentinel `char_index = -1`.
+- `display_ipa` equals `ipa` by default.
+- With `preserve_literals="punct"`, punctuation is kept in `display_ipa` without
+  changing canonical `ipa`.
 
 
 ASRModel
@@ -266,6 +285,8 @@ From `hama-js` (root) and subpaths:
 - `hama-js/g2p` -> G2P node runtime
 - `hama-js/asr` -> ASR node runtime
 - `hama-js/g2p/browser` -> browser G2P runtime
+- `hama-js/asr/browser` -> browser ASR runtime
+- `hama-js/browser` -> browser G2P + ASR runtime
 
 Core TS exports:
 - `G2PNodeModel`
@@ -280,10 +301,10 @@ Create:
 - `G2PNodeModel.create({ modelPath?, encoderModelPath?, decoderStepModelPath?, maxInputLen?, maxOutputLen? })`
 
 Predict:
-- `predict(text, { splitDelimiter?, outputDelimiter? })`
+- `predict(text, { splitDelimiter?, outputDelimiter?, preserveLiterals? })`
 
 Output:
-- `{ ipa: string, alignments: Alignment[] }`
+- `{ ipa: string, displayIpa: string, alignments: Alignment[] }`
 
 
 ASRNodeModel
@@ -306,6 +327,27 @@ Output (`ASRResult`):
 Design choice:
 - TS ASR is waveform-only and expects a waveform-input ONNX.
 - No additional third-party DSP packages were introduced.
+
+
+ASRBrowserModel
+---------------
+Create:
+- `ASRBrowserModel.create({ modelUrl?, vocabUrl?, sampleRate?, blankToken?, unkToken?, wordBoundaryToken?, blankBias?, unkBias?, collapseRepeats? })`
+
+Inference methods:
+- `transcribeWaveform(samples, sampleRate)`
+
+Output (`ASRResult`):
+- `phonemes: string[]`
+- `phonemeText: string`
+- `wordPhonemeText: string`
+- `tokenIds: number[]`
+- `frameTokenIds: number[]`
+- `numFrames: number`
+
+Notes:
+- Browser ASR is waveform-only.
+- Browser ASR does not provide `transcribeWavFile`; decode the file to PCM in app code first.
 
 WAV support (TS):
 - PCM int WAV: 8/16/24/32-bit
@@ -418,6 +460,8 @@ bun test
 bun test tests/asr.test.ts
 bun run validate:model:split
 bun run validate:asr
+bun run validate:browser
+bun run validate:browser:asr
 ```
 
 Note:
@@ -448,6 +492,10 @@ TypeScript package (`ts/package.json`)
   - `./asr`
   - browser and utility subpaths
 - Files include `dist/` only (keeps publish artifact small)
+
+Release notes
+-------------
+- See `CHANGELOG.md` for patch notes by version.
 
 
 Troubleshooting

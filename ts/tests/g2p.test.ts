@@ -7,6 +7,7 @@ describe("G2PNodeModel", () => {
     const model = await G2PNodeModel.create();
     const result = await model.predict("안녕하세요");
     expect(result.ipa.length).toBeGreaterThan(0);
+    expect(result.displayIpa).toBe(result.ipa);
     expect(result.alignments.length).toBeGreaterThan(0);
     expect(result.alignments.every((al) => al.charIndex >= 0)).toBe(true);
     const joined = result.alignments.map((al) => al.phoneme).join("");
@@ -77,5 +78,25 @@ describe("G2PNodeModel", () => {
       outputDelimiter: " | ",
     });
     expect(result.ipa.includes(" | ")).toBe(true);
+  });
+
+  it("keeps punctuation out of canonical IPA but preserves it in display output", async () => {
+    const model = await G2PNodeModel.create();
+    const base = await model.predict("hello");
+    const punct = await model.predict("hello!", { preserveLiterals: "punct" });
+    expect(punct.ipa).toBe(base.ipa);
+    expect(punct.displayIpa.endsWith("!")).toBe(true);
+    expect(punct.ipa.includes("!")).toBe(false);
+  });
+
+  it("does not preserve an explicit split delimiter as punctuation", async () => {
+    const model = await G2PNodeModel.create();
+    const result = await model.predict("hello,world", {
+      splitDelimiter: ",",
+      outputDelimiter: " | ",
+      preserveLiterals: "punct",
+    });
+    expect(result.displayIpa.includes(" | ")).toBe(true);
+    expect(result.displayIpa.includes(",")).toBe(false);
   });
 });
