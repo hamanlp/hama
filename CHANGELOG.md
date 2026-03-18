@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.7 - 2026-03-16
+
+- Aligned Python `hama` and TypeScript `hama-js` on version `1.3.7` for cross-runtime release parity.
+- Fixed `hama-js` browser export targets:
+  - `hama-js/browser`
+  - `hama-js/g2p/browser`
+  - `hama-js/asr/browser`
+- Browser package exports now point at the actual emitted browser bundle file:
+  - `dist/browser/browser.js`
+  instead of the nonexistent `dist/browser/index.js`
+- Python package change in this release is version alignment only; runtime behavior is unchanged.
+
 ## v1.3.6 - 2026-03-11
 
 - Added a real browser ASR runtime in `hama-js`:
