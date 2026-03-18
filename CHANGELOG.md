@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.3.8 - 2026-03-19
+
+- Exported and packaged a new G2P split ONNX model for both Python and TypeScript runtimes.
+- Fixed the packaged `g2p_vocab.json` files so they now match the shipped G2P model instead of a stale vocab ordering.
+- This release is primarily a packaged-asset correctness update:
+  - G2P decoding output now maps token IDs through the correct vocab file
+  - Python and TypeScript package versions are aligned at `1.3.8`
+
 ## v1.3.7 - 2026-03-16
 
 - Aligned Python `hama` and TypeScript `hama-js` on version `1.3.7` for cross-runtime release parity.
