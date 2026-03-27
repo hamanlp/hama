@@ -137,3 +137,20 @@ def test_asr_unk_bias_can_suppress_unk_predictions(monkeypatch: pytest.MonkeyPat
 
     assert result.phonemes
     assert "<unk>" not in result.phonemes
+
+
+def test_asr_temperature_is_applied_before_argmax(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    _patch_runtime(monkeypatch)
+    model = ASRModel(
+        model_path=_fake_model_path(tmp_path),
+        decode=ASRDecodeConfig(temperature=0.5, blank_bias=0.25, unk_bias=0.0),
+    )
+    token_a = model.decoder_tokens.index("a")
+    blank_id = model.decoder_tokens.index("<blank>")
+
+    logits = np.zeros((4, len(model.decoder_tokens)), dtype=np.float32)
+    logits[:, blank_id] = 0.0
+    logits[:, token_a] = 0.2
+    result = model._decode_single(logits, out_length=4)
+
+    assert result.phonemes == ["a"]

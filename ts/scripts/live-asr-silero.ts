@@ -1,10 +1,20 @@
 import { ASRNodeModel } from "../src/asr";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 const parseArg = (name: string, defaultValue?: string): string | undefined => {
   const idx = process.argv.indexOf(name);
   if (idx < 0) return defaultValue;
   return process.argv[idx + 1] ?? defaultValue;
+};
+
+const parseArgAny = (names: string[], defaultValue?: string): string | undefined => {
+  for (const name of names) {
+    const value = parseArg(name);
+    if (value !== undefined) return value;
+  }
+  return defaultValue;
 };
 
 const parseNum = (name: string, defaultValue: number): number => {
@@ -45,6 +55,52 @@ const pcm16ToFloat32 = (buf: Buffer): Float32Array => {
   return out;
 };
 
+const encodeFloat32MonoWav = (samples: Float32Array, sampleRate: number): Buffer => {
+  const pcm16 = new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    const v = samples[i] < -1 ? -1 : samples[i] > 1 ? 1 : samples[i];
+    pcm16[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
+  }
+
+  const bytesPerSample = 2;
+  const dataSize = pcm16.length * bytesPerSample;
+  const buf = Buffer.alloc(44 + dataSize);
+  buf.write("RIFF", 0, 4, "ascii");
+  buf.writeUInt32LE(36 + dataSize, 4);
+  buf.write("WAVE", 8, 4, "ascii");
+  buf.write("fmt ", 12, 4, "ascii");
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(sampleRate * bytesPerSample, 28);
+  buf.writeUInt16LE(bytesPerSample, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36, 4, "ascii");
+  buf.writeUInt32LE(dataSize, 40);
+  for (let i = 0; i < pcm16.length; i++) {
+    buf.writeInt16LE(pcm16[i], 44 + i * 2);
+  }
+  return buf;
+};
+
+const saveSegmentWav = (
+  outputDir: string,
+  index: number,
+  samples: Float32Array,
+  sampleRate: number,
+  startMs: number,
+  endMs: number,
+): string => {
+  fs.mkdirSync(outputDir, { recursive: true });
+  const filePath = path.join(
+    outputDir,
+    `segment_${String(index).padStart(4, "0")}_${Math.round(startMs)}_${Math.round(endMs)}.wav`,
+  );
+  fs.writeFileSync(filePath, encodeFloat32MonoWav(samples, sampleRate));
+  return filePath;
+};
+
 const requiredSilenceMs = (utteranceMs: number): number => {
   if (utteranceMs < 3000) return 1000;
   if (utteranceMs < 5000) {
@@ -65,12 +121,16 @@ const requiredSilenceMs = (utteranceMs: number): number => {
 const main = async (): Promise<void> => {
   const sampleRate = parseNum("--sample-rate", 16000);
   const vadThreshold = parseNum("--vad-threshold", 0.6);
-  const preSpeechPadMs = parseNum("--vad-speech-pad-ms", 30);
-  const minSpeechMs = parseNum("--min-utterance-ms", 180);
-  const unkBias = parseNum("--unk-bias", -1.5);
+  const leftPadMs = parseNum("--left-pad-ms", 250);
+  const rightPadMs = parseNum("--right-pad-ms", 500);
+  const minSpeechMs = parseNum("--min-utterance-ms", 250);
+  const temperature = parseNum("--temperature", 0.95);
+  const unkBias = parseNum("--unk-bias", 0.0);
   const showUnk = hasFlag("--show-unk");
   const inputDevice = parseArg("--input-device");
-  const modelPath = parseArg("--model");
+  const modelPath = parseArgAny(["--asr-model", "--model"]);
+  const saveSegmentsDir = parseArg("--save-segments-dir");
+  const listeningLogIntervalSec = parseNum("--listening-log-interval-sec", 5.0);
   const recordProgram =
     parseArg("--record-program") ??
     (process.platform === "linux" ? "arecord" : "sox");
@@ -100,6 +160,7 @@ const main = async (): Promise<void> => {
 
   const asr = await ASRNodeModel.create({
     modelPath,
+    temperature,
     blankBias: -0.1,
     unkBias,
   });
@@ -107,8 +168,9 @@ const main = async (): Promise<void> => {
   const frameSamples = 512;
   const targetVadSampleRate = 16000;
   const frameMs = (frameSamples * 1000) / targetVadSampleRate;
-  const preSpeechPadFrames = Math.max(1, Math.round(preSpeechPadMs / frameMs));
+  const preSpeechPadFrames = Math.max(1, Math.round(leftPadMs / frameMs));
   const minSpeechFrames = Math.max(1, Math.ceil(minSpeechMs / frameMs));
+  const rightPadFrames = Math.max(0, Math.round(rightPadMs / frameMs));
   const vad = await NonRealTimeVADCtor.new({
     positiveSpeechThreshold: vadThreshold,
     negativeSpeechThreshold: Math.max(0, vadThreshold - 0.15),
@@ -160,12 +222,18 @@ const main = async (): Promise<void> => {
   console.log(
     "[live-ts] VAD: Silero threshold=0.6, silence=1000ms(<3s) -> 500ms(5s) -> 200ms(12s) -> 100ms(17s) -> 0ms(>17s)",
   );
+  console.log(
+    `[live-ts] Decode: temperature=${temperature.toFixed(2)} blank_bias=-0.1 unk_bias=${unkBias.toFixed(2)}`,
+  );
+  console.log(`[live-ts] Segment padding: left=${leftPadMs}ms right=${rightPadMs}ms`);
   console.log("[live-ts] waiting for speech...");
 
   const chunkQueue: Buffer[] = [];
   let processing = false;
   let frameIndex = 0;
   let segmentStartFrame = -1;
+  let lastHeartbeatFrame = 0;
+  let segmentIndex = 0;
 
   const pumpAudio = async (): Promise<void> => {
     if (processing) return;
@@ -179,9 +247,9 @@ const main = async (): Promise<void> => {
         for (const frame of frames) {
           if (segmentStartFrame >= 0) {
             const utteranceMs = (frameIndex - segmentStartFrame + 1) * frameMs;
-            frameProcessor.options.redemptionFrames = Math.ceil(requiredSilenceMs(utteranceMs) / frameMs);
+            frameProcessor.options.redemptionFrames = Math.ceil((requiredSilenceMs(utteranceMs) + rightPadMs) / frameMs);
           } else {
-            frameProcessor.options.redemptionFrames = Math.ceil(1000 / frameMs);
+            frameProcessor.options.redemptionFrames = Math.ceil((1000 + rightPadMs) / frameMs);
           }
 
           const { msg, audio } = await frameProcessor.process(frame);
@@ -189,16 +257,37 @@ const main = async (): Promise<void> => {
             segmentStartFrame = Math.max(0, frameIndex - preSpeechPadFrames);
             const startMs = segmentStartFrame * frameMs;
             console.log(`[vad-ts] speech start @ ${Math.round(startMs)}ms`);
+            lastHeartbeatFrame = frameIndex;
           } else if (msg === MessageEnum.SpeechEnd && audio) {
             const startMs = Math.max(0, segmentStartFrame) * frameMs;
             const endMs = (frameIndex + 1) * frameMs;
             segmentStartFrame = -1;
             console.log(`[vad-ts] speech ${Math.round(startMs)}ms -> ${Math.round(endMs)}ms`);
+            if (saveSegmentsDir) {
+              const segmentPath = saveSegmentWav(
+                saveSegmentsDir,
+                segmentIndex,
+                audio,
+                targetVadSampleRate,
+                startMs,
+                endMs,
+              );
+              console.log(`[segment-ts] ${segmentPath}`);
+              segmentIndex += 1;
+            }
 
             const result = await asr.transcribeWaveform(audio, targetVadSampleRate);
             const tokens = showUnk ? result.phonemes : result.phonemes.filter((t) => t !== "<unk>");
             const text = tokens.join(" ").trim();
             if (text.length > 0) console.log(`[phonemes-ts] ${text}`);
+            lastHeartbeatFrame = frameIndex;
+          } else if (segmentStartFrame < 0 && listeningLogIntervalSec > 0) {
+            const framesSinceHeartbeat = frameIndex - lastHeartbeatFrame;
+            const heartbeatFrames = Math.max(1, Math.round((listeningLogIntervalSec * 1000) / frameMs));
+            if (framesSinceHeartbeat >= heartbeatFrames) {
+              console.log("[live-ts] listening... (no speech detected yet)");
+              lastHeartbeatFrame = frameIndex;
+            }
           }
           frameIndex += 1;
         }
@@ -225,6 +314,19 @@ const main = async (): Promise<void> => {
     try {
       const final = frameProcessor.endSegment();
       if (final.msg === MessageEnum.SpeechEnd && final.audio) {
+        const startMs = Math.max(0, segmentStartFrame) * frameMs;
+        const endMs = frameIndex * frameMs;
+        if (saveSegmentsDir) {
+          const segmentPath = saveSegmentWav(
+            saveSegmentsDir,
+            segmentIndex,
+            final.audio,
+            targetVadSampleRate,
+            startMs,
+            endMs,
+          );
+          console.log(`[segment-ts] ${segmentPath}`);
+        }
         const result = await asr.transcribeWaveform(final.audio, targetVadSampleRate);
         const tokens = showUnk ? result.phonemes : result.phonemes.filter((t) => t !== "<unk>");
         const text = tokens.join(" ").trim();

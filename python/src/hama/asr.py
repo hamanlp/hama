@@ -17,6 +17,7 @@ class ASRDecodeConfig:
     blank_token: str = "<blank>"
     word_boundary_token: str = "<wb>"
     unk_token: str = "<unk>"
+    temperature: float = 1.0
     blank_bias: float = -0.1
     unk_bias: float = 0.0
     collapse_repeats: bool = True
@@ -253,8 +254,12 @@ class ASRModel:
                 num_frames=0,
             )
 
-        if abs(self.decode_cfg.blank_bias) > 1e-8:
+        if self.decode_cfg.temperature > 0.0 and abs(self.decode_cfg.temperature - 1.0) > 1e-8:
             logits = logits.copy()
+            logits /= float(self.decode_cfg.temperature)
+        if abs(self.decode_cfg.blank_bias) > 1e-8:
+            if self.decode_cfg.temperature <= 0.0 or abs(self.decode_cfg.temperature - 1.0) <= 1e-8:
+                logits = logits.copy()
             logits[:, self.blank_id] += float(self.decode_cfg.blank_bias)
         if self.unk_id is not None and abs(self.decode_cfg.unk_bias) > 1e-8:
             if abs(self.decode_cfg.blank_bias) <= 1e-8:

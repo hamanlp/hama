@@ -36,6 +36,7 @@ export interface ASRBrowserOptions {
   blankToken?: string;
   unkToken?: string;
   wordBoundaryToken?: string;
+  temperature?: number;
   blankBias?: number;
   unkBias?: number;
   collapseRepeats?: boolean;
@@ -406,6 +407,7 @@ export class ASRBrowserModel {
   private readonly blankId: number;
   private readonly unkId: number | null;
   private readonly wordBoundaryToken: string;
+  private readonly temperature: number;
   private readonly blankBias: number;
   private readonly unkBias: number;
   private readonly collapseRepeats: boolean;
@@ -423,6 +425,7 @@ export class ASRBrowserModel {
     this.session = session;
     this.sampleRate = options.sampleRate;
     this.wordBoundaryToken = options.wordBoundaryToken;
+    this.temperature = options.temperature;
     this.blankBias = options.blankBias;
     this.unkBias = options.unkBias;
     this.collapseRepeats = options.collapseRepeats;
@@ -461,6 +464,7 @@ export class ASRBrowserModel {
       blankToken: options.blankToken ?? "<blank>",
       unkToken: options.unkToken ?? "<unk>",
       wordBoundaryToken: options.wordBoundaryToken ?? "<wb>",
+      temperature: options.temperature ?? 1.0,
       blankBias: options.blankBias ?? -0.1,
       unkBias: options.unkBias ?? 0.0,
       collapseRepeats: options.collapseRepeats ?? true,
@@ -522,7 +526,7 @@ export class ASRBrowserModel {
       for (let c = 0; c < classes; c++) {
         const raw = Number(data[base + c]);
         const score =
-          raw
+          (this.temperature > 0 && Math.abs(this.temperature - 1.0) > 1e-8 ? raw / this.temperature : raw)
           + (c === this.blankId ? this.blankBias : 0.0)
           + (this.unkId !== null && c === this.unkId ? this.unkBias : 0.0);
         if (score > bestScore) {

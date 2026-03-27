@@ -115,6 +115,28 @@ describe("ASRNodeModel", () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("applies temperature before decode scoring", async () => {
+    const model = await ASRNodeModel.create({
+      modelPath: "/tmp/fake-asr-waveform.onnx",
+      temperature: 0.5,
+      blankBias: 0.25,
+      unkBias: 0.0,
+    });
+
+    const logits = new Float32Array(4 * 5).fill(-10.0);
+    for (let t = 0; t < 4; t++) {
+      logits[t * 5 + 0] = 0.2;
+      logits[t * 5 + 4] = 0.0;
+    }
+
+    const result = (model as any).argmaxFrames(
+      new FakeTensor("float32", logits, [1, 4, 5]),
+      4,
+    ) as number[];
+
+    expect(result.every((v) => v === 0)).toBe(true);
+  });
 });
 
 const encodePcm16MonoWav = (samples: Int16Array, sampleRate: number): Buffer => {

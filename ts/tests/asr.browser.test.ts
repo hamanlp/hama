@@ -88,4 +88,26 @@ describe("ASRBrowserModel", () => {
     expect(result.phonemeText).toBe(result.phonemes.join(" "));
     expect(result.wordPhonemeText.length).toBeGreaterThan(0);
   });
+
+  it("applies temperature before decode scoring", async () => {
+    const model = await ASRBrowserModel.create({
+      modelUrl: "https://example.com/asr_waveform_fp16.onnx",
+      temperature: 0.5,
+      blankBias: 0.25,
+      unkBias: 0.0,
+    });
+
+    const logits = new Float32Array(4 * 5).fill(-10.0);
+    for (let t = 0; t < 4; t++) {
+      logits[t * 5 + 0] = 0.2;
+      logits[t * 5 + 4] = 0.0;
+    }
+
+    const result = (model as any).argmaxFrames(
+      new FakeWebTensor("float32", logits, [1, 4, 5]),
+      4,
+    ) as number[];
+
+    expect(result.every((v) => v === 0)).toBe(true);
+  });
 });
