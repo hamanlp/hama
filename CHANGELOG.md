@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.10 - 2026-04-14
+
+- Refreshed the packaged ASR waveform ONNX model in both Python and TypeScript runtimes.
+- Kept the public ASR API unchanged while updating the shipped `asr_waveform_fp16.onnx` asset.
+- Aligned Python `hama` and TypeScript `hama-js` on version `1.3.10`.
+
 ## v1.3.9 - 2026-03-24
 
 - Refreshed the packaged ASR waveform ONNX model in both Python and TypeScript runtimes.
