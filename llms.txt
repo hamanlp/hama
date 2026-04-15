@@ -196,6 +196,11 @@ Core exports from `hama`
 - `G2PModel`
 - `G2PResult`
 - `G2PAlignment`
+- `PronunciationTerm`
+- `PronunciationMatch`
+- `PronunciationPatch`
+- `pronunciation_scan`
+- `pronunciation_replace`
 - `ASRModel`
 - `ASRResult`
 - `ASRDecodeConfig`
@@ -236,6 +241,73 @@ Notes:
 - `display_ipa` equals `ipa` by default.
 - With `preserve_literals="punct"`, punctuation is kept in `display_ipa` without
   changing canonical `ipa`.
+
+
+Pronunciation transcript correction (Python)
+--------------------------------------------
+Public functions:
+- `pronunciation_scan(text, terms, options=None) -> PronunciationScanResult`
+- `pronunciation_replace(text, terms, options=None) -> PronunciationReplaceResult`
+
+Supported term inputs:
+- plain string
+- `PronunciationTerm`:
+  - `id`
+  - `text`
+  - `canonical`
+  - `pronunciations`
+  - `aliases`
+  - `metadata`
+
+Critical contract:
+- `start_char` / `end_char` always point into the original input string
+- the transcript is tokenized from original text before comparison normalization
+- replacements are applied to the original text, not to a rewritten normalization buffer
+
+Scan defaults:
+- `language="en"`
+- `max_distance_ratio=0.20`
+- `threshold_basis="phonemes"`
+- `word_boundary_mode="flexible"`
+- `token_slack=1`
+- `qgram_size=2`
+- `scoring="hybrid"`
+- `phoneme_weight=0.85`
+- `text_weight=0.15`
+- `resolve_overlaps="best_non_overlapping"`
+- `allow_short_fuzzy=False`
+
+Replace defaults:
+- inherits scan options
+- `min_score=0.72`
+- `replacement_source="canonical"`
+- `case_strategy="canonical"`
+- `conflict_policy="weighted_interval"`
+- `ambiguous_policy="skip"`
+- `ambiguity_margin=0.05`
+- `include_discarded=True`
+
+Behavior:
+- token-boundary only
+- pronunciation-first matching
+- phoneme q-gram filtering before exact verification
+- exact thresholded edit-distance verification
+- adaptive threshold per term
+- deterministic ambiguity handling on exact spans
+- deterministic non-overlap selection before rewriting
+
+Result shape highlights:
+- scan result:
+  - `matches`
+  - `stats`
+- replace result:
+  - `original_text`
+  - `text`
+  - `applied`
+  - `discarded`
+  - `patches`
+  - `stats`
+  - `raw_matches` when requested
 
 
 ASRModel
@@ -291,6 +363,8 @@ From `hama-js` (root) and subpaths:
 Core TS exports:
 - `G2PNodeModel`
 - `ASRNodeModel`
+- `pronunciationScan`
+- `pronunciationReplace`
 - `decodeCtcTokens`
 - tokenizer/jamo helpers
 
@@ -305,6 +379,22 @@ Predict:
 
 Output:
 - `{ ipa: string, displayIpa: string, alignments: Alignment[] }`
+
+Pronunciation correction:
+- `model.pronunciationScan(text, terms, options?)`
+- `model.pronunciationReplace(text, terms, options?)`
+
+Top-level helpers:
+- `pronunciationScan(text, terms, options?)`
+- `pronunciationReplace(text, terms, options?)`
+- These are async because the underlying G2P runtime is async in TS.
+
+Term and result types:
+- `PronunciationTerm`
+- `PronunciationMatch`
+- `PronunciationPatch`
+- `PronunciationScanResult`
+- `PronunciationReplaceResult`
 
 
 ASRNodeModel
@@ -348,6 +438,10 @@ Output (`ASRResult`):
 Notes:
 - Browser ASR is waveform-only.
 - Browser ASR does not provide `transcribeWavFile`; decode the file to PCM in app code first.
+- Browser G2P also exposes:
+  - `pronunciationScan(text, terms, options?)`
+  - `pronunciationReplace(text, terms, options?)`
+  - and matching instance methods on `G2PBrowserModel`
 
 WAV support (TS):
 - PCM int WAV: 8/16/24/32-bit

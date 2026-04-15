@@ -16,6 +16,17 @@ from .asr import (
     read_wav_mono,
 )
 from .inference import G2PAlignment, G2PModel, G2PResult
+from .pronunciation import (
+    PronunciationMatch,
+    PronunciationPatch,
+    PronunciationReplaceOptions,
+    PronunciationReplaceResult,
+    PronunciationScanOptions,
+    PronunciationScanResult,
+    PronunciationTerm,
+    pronunciation_replace,
+    pronunciation_scan,
+)
 from .tokenizer import TextTokenizer
 from .vocab import Vocabulary
 
@@ -25,6 +36,15 @@ __all__ = [
     "G2PAlignment",
     "G2PModel",
     "G2PResult",
+    "PronunciationTerm",
+    "PronunciationMatch",
+    "PronunciationPatch",
+    "PronunciationScanOptions",
+    "PronunciationScanResult",
+    "PronunciationReplaceOptions",
+    "PronunciationReplaceResult",
+    "pronunciation_scan",
+    "pronunciation_replace",
     "ASRDecodeConfig",
     "ASRModel",
     "ASRResult",

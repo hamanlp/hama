@@ -12,6 +12,17 @@ import {
   prepareTextForPrediction,
   PreserveLiteralsMode,
 } from "./tokenizer.js";
+import {
+  PronunciationMatch,
+  PronunciationPatch,
+  PronunciationReplaceOptions,
+  PronunciationReplaceResult,
+  pronunciationReplaceWithModel,
+  PronunciationScanOptions,
+  PronunciationScanResult,
+  PronunciationTerm,
+  pronunciationScanWithModel,
+} from "./pronunciation.js";
 
 export interface G2POptions {
   modelPath?: string;
@@ -31,6 +42,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultModelPath = path.join(__dirname, "assets", "g2p_fp16.onnx");
 const defaultEncoderModelPath = path.join(__dirname, "assets", "encoder.onnx");
 const defaultDecoderStepModelPath = path.join(__dirname, "assets", "decoder_step.onnx");
+let defaultPronunciationModelPromise: Promise<G2PNodeModel> | null = null;
 
 type NodeSessions =
   | { session: InferenceSession; encoderSession?: undefined; decoderStepSession?: undefined }
@@ -149,6 +161,22 @@ export class G2PNodeModel {
       }
     }
     return { ipa: ipaParts.join(""), displayIpa: displayParts.join(""), alignments };
+  }
+
+  async pronunciationScan(
+    text: string,
+    terms: Array<string | PronunciationTerm>,
+    options: PronunciationScanOptions = {},
+  ): Promise<PronunciationScanResult> {
+    return pronunciationScanWithModel(this, text, terms, options);
+  }
+
+  async pronunciationReplace(
+    text: string,
+    terms: Array<string | PronunciationTerm>,
+    options: PronunciationReplaceOptions = {},
+  ): Promise<PronunciationReplaceResult> {
+    return pronunciationReplaceWithModel(this, text, terms, options);
   }
 
   private async predictSingle(
@@ -380,6 +408,27 @@ const codePointOffset = (text: string, codeUnitOffset: number): number => {
   return codePointIndex;
 };
 
+const getDefaultPronunciationModel = (): Promise<G2PNodeModel> => {
+  if (defaultPronunciationModelPromise == null) {
+    defaultPronunciationModelPromise = G2PNodeModel.create();
+  }
+  return defaultPronunciationModelPromise;
+};
+
+export const pronunciationScan = async (
+  text: string,
+  terms: Array<string | PronunciationTerm>,
+  options: PronunciationScanOptions = {},
+): Promise<PronunciationScanResult> =>
+  pronunciationScanWithModel(await getDefaultPronunciationModel(), text, terms, options);
+
+export const pronunciationReplace = async (
+  text: string,
+  terms: Array<string | PronunciationTerm>,
+  options: PronunciationReplaceOptions = {},
+): Promise<PronunciationReplaceResult> =>
+  pronunciationReplaceWithModel(await getDefaultPronunciationModel(), text, terms, options);
+
 export {
   ASRNodeModel,
   decodeCtcTokens,
@@ -389,3 +438,12 @@ export type {
   ASRResult,
   CTCDecodeOptions,
 } from "./asr.js";
+export type {
+  PronunciationMatch,
+  PronunciationPatch,
+  PronunciationReplaceOptions,
+  PronunciationReplaceResult,
+  PronunciationScanOptions,
+  PronunciationScanResult,
+  PronunciationTerm,
+} from "./pronunciation.js";

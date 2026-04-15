@@ -88,6 +88,10 @@ The public API lives in `hama.__init__`:
 - `split_text_to_jamo` / `join_jamo_tokens` – reversible Hangul disassembly
 - `G2PModel.predict(text)` – returns canonical IPA, a display-friendly IPA string,
   and `phoneme -> char_index` alignments derived from attention weights
+- `pronunciation_scan(text, terms, options=None)` – scans a finished transcript for
+  pronunciation-aware keyword/name matches and returns original-input spans
+- `pronunciation_replace(text, terms, options=None)` – resolves ambiguity/overlap,
+  applies canonical replacements back onto the original text, and returns patch metadata
 - `predict(..., split_delimiter=r"\s+", output_delimiter=" ", preserve_literals="none" | "punct")`
   can segment input before inference, join segment IPA outputs with a delimiter,
   and optionally preserve punctuation in `result.display_ipa` without changing
@@ -178,6 +182,10 @@ API overview:
 - `G2PNodeModel.create({ modelPath?, encoderModelPath?, decoderStepModelPath?, maxInputLen?, maxOutputLen? })`
 - `model.predict(text, { splitDelimiter?: /\s+/u by default, outputDelimiter?: " ", preserveLiterals?: "none" | "punct" })`
   → `{ ipa, displayIpa, alignments }`
+- `pronunciationScan(text, terms, options?)` → async pronunciation-aware scan result
+- `pronunciationReplace(text, terms, options?)` → async rewrite result with applied/discarded patches
+- `model.pronunciationScan(text, terms, options?)` and `model.pronunciationReplace(text, terms, options?)`
+  reuse an existing G2P model instance instead of creating one implicitly
 - `displayIpa` preserves punctuation only when requested; canonical `ipa` stays
   punctuation-free
 - `alignments[].charIndex` is `-1` only for whitespace-only input
@@ -199,6 +207,51 @@ The package copies `assets/*.onnx` + `g2p_vocab.json` into `dist` so Node/Bun
 resolves them via `import.meta.url`. For browser deployments, host the ONNX
 assets next to the bundle (default URLs resolve relative to the built module),
 and pass `vocabUrl` when you want a browser-specific decoder vocab JSON.
+
+## Pronunciation Correction
+
+Both runtimes now expose a transcript-correction layer for post-hoc cleanup of
+names and short phrases using pronunciation-aware matching.
+
+Python:
+
+```python
+from hama import pronunciation_replace
+
+result = pronunciation_replace(
+    "today we spoke with jon smyth from o reilly media",
+    [
+        {"id": "john_smythe", "text": "John Smythe", "aliases": ["Jon Smyth"]},
+        {"id": "oreilly_media", "text": "O'Reilly Media"},
+    ],
+)
+print(result["text"])
+```
+
+TypeScript:
+
+```ts
+import { pronunciationReplace } from "hama-js";
+
+const result = await pronunciationReplace(
+  "today we spoke with jon smyth from o reilly media",
+  [
+    { id: "john_smythe", text: "John Smythe", aliases: ["Jon Smyth"] },
+    { id: "oreilly_media", text: "O'Reilly Media" },
+  ],
+);
+console.log(result.text);
+```
+
+Key behavior:
+
+- offsets always refer to the original input string
+- matching is token-boundary only
+- matching is pronunciation-first, with compact text similarity as a secondary score
+- replacements are applied in one pass to the original text after ambiguity and
+  overlap resolution
+- replace mode uses weighted interval scheduling by default so a longer or
+  slightly earlier candidate does not automatically win
 
 Release notes live in [`CHANGELOG.md`](/Users/seongmin/hama/CHANGELOG.md).
 

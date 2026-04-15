@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.3.11 - 2026-04-15
+
+- Added pronunciation-aware transcript correction APIs in both runtimes:
+  - Python: `pronunciation_scan`, `pronunciation_replace`
+  - TypeScript: `pronunciationScan`, `pronunciationReplace`
+- Added deterministic token-boundary matching with original-input offsets, phoneme q-gram candidate filtering, exact edit-distance verification, and weighted non-overlap selection for replacements.
+- Updated `README.md` and `llms.txt` to document the new transcript-correction surface.
+- Aligned Python `hama` and TypeScript `hama-js` on version `1.3.11`.
+
 ## v1.3.10 - 2026-04-14
 
 - Refreshed the packaged ASR waveform ONNX model in both Python and TypeScript runtimes.

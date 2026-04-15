@@ -10,6 +10,17 @@ import {
   prepareTextForPrediction,
   PreserveLiteralsMode,
 } from "./tokenizer.js";
+import {
+  PronunciationMatch,
+  PronunciationPatch,
+  pronunciationReplaceWithModel,
+  PronunciationReplaceOptions,
+  PronunciationReplaceResult,
+  pronunciationScanWithModel,
+  PronunciationScanOptions,
+  PronunciationScanResult,
+  PronunciationTerm,
+} from "./pronunciation.js";
 
 export interface BrowserOptions {
   modelUrl?: string;
@@ -61,6 +72,7 @@ const DEFAULT_MODEL_URL = new URL("./assets/g2p_fp16.onnx", import.meta.url).toS
 const DEFAULT_ENCODER_URL = new URL("./assets/encoder.onnx", import.meta.url).toString();
 const DEFAULT_DECODER_STEP_URL = new URL("./assets/decoder_step.onnx", import.meta.url).toString();
 const DEFAULT_ASR_MODEL_URL = new URL("./assets/asr_waveform_fp16.onnx", import.meta.url).toString();
+let defaultPronunciationBrowserModelPromise: Promise<G2PBrowserModel> | null = null;
 
 const resolveName = (available: readonly string[], primary: string, ...fallbacks: string[]): string => {
   if (available.includes(primary)) return primary;
@@ -228,6 +240,22 @@ export class G2PBrowserModel {
       }
     }
     return { ipa: ipaParts.join(""), displayIpa: displayParts.join(""), alignments };
+  }
+
+  async pronunciationScan(
+    text: string,
+    terms: Array<string | PronunciationTerm>,
+    options: PronunciationScanOptions = {},
+  ): Promise<PronunciationScanResult> {
+    return pronunciationScanWithModel(this, text, terms, options);
+  }
+
+  async pronunciationReplace(
+    text: string,
+    terms: Array<string | PronunciationTerm>,
+    options: PronunciationReplaceOptions = {},
+  ): Promise<PronunciationReplaceResult> {
+    return pronunciationReplaceWithModel(this, text, terms, options);
   }
 
   private async predictSingle(
@@ -597,6 +625,37 @@ const codePointOffset = (text: string, codeUnitOffset: number): number => {
   }
   return codePointIndex;
 };
+
+const getDefaultPronunciationBrowserModel = (): Promise<G2PBrowserModel> => {
+  if (defaultPronunciationBrowserModelPromise == null) {
+    defaultPronunciationBrowserModelPromise = G2PBrowserModel.create();
+  }
+  return defaultPronunciationBrowserModelPromise;
+};
+
+export const pronunciationScan = async (
+  text: string,
+  terms: Array<string | PronunciationTerm>,
+  options: PronunciationScanOptions = {},
+): Promise<PronunciationScanResult> =>
+  pronunciationScanWithModel(await getDefaultPronunciationBrowserModel(), text, terms, options);
+
+export const pronunciationReplace = async (
+  text: string,
+  terms: Array<string | PronunciationTerm>,
+  options: PronunciationReplaceOptions = {},
+): Promise<PronunciationReplaceResult> =>
+  pronunciationReplaceWithModel(await getDefaultPronunciationBrowserModel(), text, terms, options);
+
+export type {
+  PronunciationMatch,
+  PronunciationPatch,
+  PronunciationReplaceOptions,
+  PronunciationReplaceResult,
+  PronunciationScanOptions,
+  PronunciationScanResult,
+  PronunciationTerm,
+} from "./pronunciation.js";
 
 const toFloat32Mono = (waveform: readonly number[] | Float32Array): Float32Array => {
   if (waveform instanceof Float32Array) {
