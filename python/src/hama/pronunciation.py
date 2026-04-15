@@ -8,6 +8,7 @@ import re
 import unicodedata
 
 from .inference import G2PModel
+from .jamo import split_text_to_jamo
 
 
 class PronunciationTerm(TypedDict, total=False):
@@ -21,6 +22,7 @@ class PronunciationTerm(TypedDict, total=False):
 
 class PronunciationScanOptions(TypedDict, total=False):
     language: str
+    span_unit: Literal["token", "character"]
     max_distance_ratio: float
     min_distance: int
     max_distance: int | None
@@ -68,6 +70,7 @@ class PronunciationScanStats(TypedDict, total=False):
     candidate_variants_verified: int
     matches_returned: int
     rejected_by_length: int
+    rejected_by_input_limit: int
     rejected_by_qgram: int
     rejected_by_distance: int
 
@@ -79,6 +82,7 @@ class PronunciationScanResult(TypedDict):
 
 class PronunciationReplaceOptions(TypedDict, total=False):
     language: str
+    span_unit: Literal["token", "character"]
     max_distance_ratio: float
     min_distance: int
     max_distance: int | None
@@ -168,6 +172,7 @@ class PronunciationReplaceResult(TypedDict):
 
 _DEFAULT_SCAN_OPTIONS: PronunciationScanOptions = {
     "language": "en",
+    "span_unit": "character",
     "max_distance_ratio": 0.20,
     "min_distance": 0,
     "max_distance": None,
@@ -189,6 +194,7 @@ _DEFAULT_SCAN_OPTIONS: PronunciationScanOptions = {
 
 _DEFAULT_REPLACE_OPTIONS: PronunciationReplaceOptions = {
     "language": "en",
+    "span_unit": "character",
     "max_distance_ratio": 0.20,
     "min_distance": 0,
     "max_distance": None,
@@ -250,6 +256,13 @@ class _Token:
     end_char: int
     phones: list[int]
     phone_tokens: list[str]
+
+
+@dataclass
+class _CharUnit:
+    start_char: int
+    end_char: int
+    token_index: int
 
 
 @dataclass
@@ -315,17 +328,33 @@ def _pronunciation_scan_impl(
     phone_encoder = _PhoneEncoder()
     qgram_encoder = _QGramEncoder()
     tokens = _prepare_tokens(text=text, model=model, options=scan_options, phone_encoder=phone_encoder)
-    compiled = _compile_variants(
+    compiled_variants, variants_by_token_count, index_by_token_count, rejected_by_input_limit = _compile_variants(
         terms=terms,
         model=model,
         options=scan_options,
         phone_encoder=phone_encoder,
         qgram_encoder=qgram_encoder,
     )
-    if not compiled:
-        return {"matches": [], "stats": _empty_scan_stats(len(tokens))}
+    base_stats = _empty_scan_stats(len(tokens))
+    base_stats["rejected_by_input_limit"] = rejected_by_input_limit
+    if not compiled_variants:
+        return {"matches": [], "stats": base_stats}
 
-    matches, stats = _scan_compiled(text=text, tokens=tokens, compiled=compiled, options=scan_options, qgram_encoder=qgram_encoder)
+    compiled = (compiled_variants, variants_by_token_count, index_by_token_count)
+
+    if scan_options["span_unit"] == "character":
+        matches, stats = _scan_compiled_by_characters(
+            text=text,
+            tokens=tokens,
+            compiled=compiled,
+            options=scan_options,
+            qgram_encoder=qgram_encoder,
+            model=model,
+            phone_encoder=phone_encoder,
+        )
+    else:
+        matches, stats = _scan_compiled(text=text, tokens=tokens, compiled=compiled, options=scan_options, qgram_encoder=qgram_encoder)
+    stats["rejected_by_input_limit"] += rejected_by_input_limit
     resolved = _resolve_scan_matches(matches, scan_options["resolve_overlaps"])
     stats["matches_returned"] = len(resolved)
     return {"matches": resolved, "stats": stats}
@@ -413,6 +442,7 @@ def _empty_scan_stats(token_count: int) -> PronunciationScanStats:
         "candidate_variants_verified": 0,
         "matches_returned": 0,
         "rejected_by_length": 0,
+        "rejected_by_input_limit": 0,
         "rejected_by_qgram": 0,
         "rejected_by_distance": 0,
     }
@@ -448,6 +478,10 @@ def _compact_surface(text: str) -> str:
 def _is_word_char(ch: str) -> bool:
     category = unicodedata.category(ch)
     return category.startswith("L") or category.startswith("N")
+
+
+def _character_unit_count(text: str) -> int:
+    return sum(1 for ch in text if _is_word_char(ch))
 
 
 def _tokenize_with_offsets(text: str) -> list[tuple[str, int, int]]:
@@ -510,16 +544,40 @@ def _prepare_tokens(
     return prepared
 
 
+def _build_character_units(text: str, tokens: Sequence[_Token]) -> list[_CharUnit]:
+    units: list[_CharUnit] = []
+    token_index = 0
+    for char_index, ch in enumerate(text):
+        if not _is_word_char(ch):
+            continue
+        while token_index < len(tokens) and char_index >= tokens[token_index].end_char:
+            token_index += 1
+        if token_index >= len(tokens):
+            break
+        if char_index < tokens[token_index].start_char or char_index >= tokens[token_index].end_char:
+            continue
+        units.append(
+            _CharUnit(
+                start_char=char_index,
+                end_char=char_index + 1,
+                token_index=token_index,
+            )
+        )
+    return units
+
+
 def _compile_variants(
     terms: Sequence[str | PronunciationTerm],
     model: Any,
     options: PronunciationScanOptions,
     phone_encoder: "_PhoneEncoder",
     qgram_encoder: "_QGramEncoder",
-) -> tuple[list[_TermVariant], dict[int, list[_TermVariant]], dict[int, dict[int, list[tuple[int, int]]]]]:
+) -> tuple[list[_TermVariant], dict[int, list[_TermVariant]], dict[int, dict[int, list[tuple[int, int]]]], int]:
     compiled: list[_TermVariant] = []
     variants_by_token_count: dict[int, list[_TermVariant]] = {}
     index_by_token_count: dict[int, dict[int, list[tuple[int, int]]]] = {}
+    max_input_len = _resolve_model_max_input_len(model)
+    rejected_by_input_limit = 0
     variant_id = 0
     for term in terms:
         term_spec = _coerce_term(term)
@@ -528,7 +586,11 @@ def _compile_variants(
 
         for surface_text, alias_text in surfaces:
             surface_norm = _normalize_for_match(surface_text)
-            token_count = len(_tokenize_with_offsets(surface_text)) or max(1, len(surface_norm.split()))
+            token_count = (
+                max(1, _character_unit_count(surface_text))
+                if options["span_unit"] == "character"
+                else len(_tokenize_with_offsets(surface_text)) or max(1, len(surface_norm.split()))
+            )
             explicit_prons = term_spec["pronunciations"][: options["max_term_pronunciations"]]
             pronunciation_inputs: Sequence[str | Sequence[str] | None]
             if explicit_prons:
@@ -537,6 +599,13 @@ def _compile_variants(
                 pronunciation_inputs = [None]
 
             for pronunciation_input in pronunciation_inputs:
+                if (
+                    pronunciation_input is None
+                    and max_input_len is not None
+                    and _estimate_predictor_input_length(surface_norm) > max_input_len
+                ):
+                    rejected_by_input_limit += 1
+                    continue
                 if pronunciation_input is None:
                     phone_tokens = _phonemize_text(surface_norm, model=model)
                     pronunciation_value: Sequence[str] | str | None = list(phone_tokens)
@@ -577,7 +646,7 @@ def _compile_variants(
                     postings.setdefault(qgram_id, []).append((variant_id, qgram_count))
                 variant_id += 1
 
-    return compiled, variants_by_token_count, index_by_token_count
+    return compiled, variants_by_token_count, index_by_token_count, rejected_by_input_limit
 
 
 def _scan_compiled(
@@ -699,6 +768,138 @@ def _scan_compiled(
     return deduped, stats
 
 
+def _scan_compiled_by_characters(
+    text: str,
+    tokens: Sequence[_Token],
+    compiled: tuple[list[_TermVariant], dict[int, list[_TermVariant]], dict[int, dict[int, list[tuple[int, int]]]]],
+    options: PronunciationScanOptions,
+    qgram_encoder: "_QGramEncoder",
+    model: Any,
+    phone_encoder: "_PhoneEncoder",
+) -> tuple[list[PronunciationMatch], PronunciationScanStats]:
+    variants, variants_by_token_count, index_by_token_count = compiled
+    stats = _empty_scan_stats(len(tokens))
+    char_units = _build_character_units(text, tokens)
+    if not variants or not char_units:
+        return [], stats
+
+    max_input_len = _resolve_model_max_input_len(model)
+    variant_by_id = {variant.variant_id: variant for variant in variants}
+    term_token_counts = sorted(variants_by_token_count.keys())
+    lengths = _window_lengths(term_token_counts, options)
+    raw_matches: list[PronunciationMatch] = []
+    window_cache: dict[str, tuple[str, list[str], list[int]] | None] = {}
+
+    for start_unit in range(len(char_units)):
+        for window_length in lengths:
+            end_unit = start_unit + window_length
+            if end_unit > len(char_units):
+                continue
+            stats["window_count"] += 1
+            window = _build_character_window(
+                text=text,
+                char_units=char_units,
+                start_unit=start_unit,
+                end_unit=end_unit,
+                model=model,
+                phone_encoder=phone_encoder,
+                cache=window_cache,
+                max_input_len=max_input_len,
+            )
+            if window is None:
+                stats["rejected_by_input_limit"] += 1
+                continue
+            relevant_counts = _candidate_token_buckets(window_length, term_token_counts, options)
+            if not relevant_counts:
+                continue
+
+            length_ok_ids: set[int] = set()
+            for token_bucket in relevant_counts:
+                for variant in variants_by_token_count.get(token_bucket, []):
+                    if abs(len(window.phones) - variant.phone_len) > variant.threshold_k:
+                        stats["rejected_by_length"] += 1
+                        continue
+                    length_ok_ids.add(variant.variant_id)
+            if not length_ok_ids:
+                continue
+
+            stats["candidate_variants_considered"] += len(length_ok_ids)
+            window_qfreq = _qgram_frequency(window.phones, options["qgram_size"], qgram_encoder)
+            candidate_overlap: dict[int, int] = {}
+            for token_bucket in relevant_counts:
+                postings = index_by_token_count.get(token_bucket, {})
+                for qgram_id, window_count_value in window_qfreq.items():
+                    for variant_id, term_qcount in postings.get(qgram_id, []):
+                        if variant_id not in length_ok_ids:
+                            continue
+                        candidate_overlap[variant_id] = candidate_overlap.get(variant_id, 0) + min(window_count_value, term_qcount)
+
+            verified_ids: list[int] = []
+            for variant_id in sorted(length_ok_ids):
+                variant = variant_by_id[variant_id]
+                required = _required_overlap(
+                    term_len=variant.phone_len,
+                    window_len=len(window.phones),
+                    q=options["qgram_size"],
+                    threshold_k=variant.threshold_k,
+                )
+                if candidate_overlap.get(variant_id, 0) < required:
+                    stats["rejected_by_qgram"] += 1
+                    continue
+                verified_ids.append(variant_id)
+            if not verified_ids:
+                continue
+
+            stats["candidate_variants_verified"] += len(verified_ids)
+            for variant_id in verified_ids:
+                variant = variant_by_id[variant_id]
+                distance = _verify_distance(
+                    pattern=variant.phones,
+                    text=window.phones,
+                    threshold_k=variant.threshold_k,
+                    verifier=options["verifier"],
+                )
+                if distance is None:
+                    stats["rejected_by_distance"] += 1
+                    continue
+
+                phoneme_similarity = _similarity(distance, len(variant.phones), len(window.phones))
+                text_distance = _levenshtein_distance(variant.surface_compact, window.surface_compact)
+                text_similarity = _similarity(text_distance, len(variant.surface_compact), len(window.surface_compact))
+                score = (
+                    phoneme_similarity
+                    if options["scoring"] == "phoneme"
+                    else options["phoneme_weight"] * phoneme_similarity + options["text_weight"] * text_similarity
+                )
+                if score < options["min_score"]:
+                    continue
+
+                match: PronunciationMatch = {
+                    "term_id": variant.term_id,
+                    "term_text": variant.term_text,
+                    "canonical": variant.canonical,
+                    "alias_text": variant.alias_text,
+                    "matched_text": window.matched_text,
+                    "start_char": window.start_char,
+                    "end_char": window.end_char,
+                    "start_token": window.start_token,
+                    "end_token": window.end_token,
+                    "score": score,
+                    "phoneme_distance": distance,
+                    "phoneme_threshold": variant.threshold_k,
+                    "phoneme_similarity": phoneme_similarity,
+                    "text_distance": text_distance,
+                    "text_similarity": text_similarity,
+                    "metadata": variant.metadata,
+                }
+                if options["return_phonemes"]:
+                    match["term_pronunciation"] = list(variant.phone_tokens)
+                    match["matched_pronunciation"] = list(window.phone_tokens)
+                raw_matches.append(match)
+
+    return _dedupe_scan_matches(raw_matches), stats
+
+
 def _window_lengths(term_token_counts: Sequence[int], options: PronunciationScanOptions) -> list[int]:
     if not term_token_counts:
         return []
@@ -744,6 +945,64 @@ def _build_window(text: str, tokens: Sequence[_Token], start_token: int, end_tok
         phones=phones,
         phone_tokens=phone_tokens,
     )
+
+
+def _build_character_window(
+    text: str,
+    char_units: Sequence[_CharUnit],
+    start_unit: int,
+    end_unit: int,
+    model: Any,
+    phone_encoder: "_PhoneEncoder",
+    cache: dict[str, tuple[str, list[str], list[int]] | None],
+    max_input_len: int | None,
+) -> _Window | None:
+    first = char_units[start_unit]
+    last = char_units[end_unit - 1]
+    matched_text = text[first.start_char : last.end_char]
+    surface_norm = _normalize_for_match(matched_text)
+    cache_key = surface_norm or matched_text
+    if cache_key not in cache:
+        if max_input_len is not None and _estimate_predictor_input_length(surface_norm or matched_text) > max_input_len:
+            cache[cache_key] = None
+            return None
+        phone_tokens = _phonemize_text(surface_norm or matched_text, model=model)
+        phones = [phone_encoder.encode(phone) for phone in phone_tokens]
+        cache[cache_key] = (surface_norm, phone_tokens, phones)
+    cached = cache.get(cache_key)
+    if cached is None:
+        return None
+    cached_surface_norm, cached_phone_tokens, cached_phones = cached
+    return _Window(
+        start_token=first.token_index,
+        end_token=last.token_index + 1,
+        start_char=first.start_char,
+        end_char=last.end_char,
+        matched_text=matched_text,
+        surface_norm=cached_surface_norm,
+        surface_compact=_compact_surface(cached_surface_norm),
+        phones=list(cached_phones),
+        phone_tokens=list(cached_phone_tokens),
+    )
+
+
+def _resolve_model_max_input_len(model: Any) -> int | None:
+    getter = getattr(model, "get_max_input_len", None)
+    if callable(getter):
+        value = getter()
+        if isinstance(value, int) and value > 0:
+            return value
+
+    tokenizer = getattr(model, "tokenizer", None)
+    value = getattr(tokenizer, "max_input_len", None)
+    if isinstance(value, int) and value > 0:
+        return value
+    return None
+
+
+def _estimate_predictor_input_length(text: str) -> int:
+    sequence = split_text_to_jamo(text)
+    return len(sequence.tokens) or 1
 
 
 def _required_overlap(term_len: int, window_len: int, q: int, threshold_k: int) -> int:

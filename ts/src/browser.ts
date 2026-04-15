@@ -258,6 +258,10 @@ export class G2PBrowserModel {
     return pronunciationReplaceWithModel(this, text, terms, options);
   }
 
+  getMaxInputLen(): number {
+    return this.options.maxInputLen;
+  }
+
   private async predictSingle(
     text: string,
     baseCharIndex: number,

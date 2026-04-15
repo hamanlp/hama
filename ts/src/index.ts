@@ -179,6 +179,10 @@ export class G2PNodeModel {
     return pronunciationReplaceWithModel(this, text, terms, options);
   }
 
+  getMaxInputLen(): number {
+    return this.maxInputLen;
+  }
+
   private async predictSingle(
     text: string,
     baseCharIndex: number,

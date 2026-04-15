@@ -266,6 +266,7 @@ Critical contract:
 
 Scan defaults:
 - `language="en"`
+- `span_unit="character"`        (`"token"` restores token-span matching)
 - `max_distance_ratio=0.20`
 - `threshold_basis="phonemes"`
 - `word_boundary_mode="flexible"`
@@ -288,7 +289,10 @@ Replace defaults:
 - `include_discarded=True`
 
 Behavior:
-- token-boundary only
+- character-span matching by default
+- default matching can match inside a larger token and ignores whitespace inside the candidate span
+- overlong character-span windows are skipped before G2P inference instead of being silently truncated
+- token-span matching remains available with `span_unit="token"`
 - pronunciation-first matching
 - phoneme q-gram filtering before exact verification
 - exact thresholded edit-distance verification
@@ -395,6 +399,13 @@ Term and result types:
 - `PronunciationPatch`
 - `PronunciationScanResult`
 - `PronunciationReplaceResult`
+
+Important pronunciation option:
+- `spanUnit: "token" | "character"`
+- default is `"character"`
+- `"token"` restores token-span matching
+- `"character"` ignores whitespace inside the candidate span and can match inside a larger token while keeping original offsets
+- scan stats include `rejectedByInputLimit` when implicit term pronunciations or candidate windows are skipped for exceeding the G2P encoder limit
 
 
 ASRNodeModel

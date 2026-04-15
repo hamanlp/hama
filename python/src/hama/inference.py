@@ -166,6 +166,9 @@ class G2PModel:
             alignments=alignments,
         )
 
+    def get_max_input_len(self) -> int:
+        return self.tokenizer.max_input_len
+
     def _predict_single(
         self,
         text: str,

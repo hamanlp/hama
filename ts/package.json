@@ -1,6 +1,6 @@
 {
   "name": "hama-js",
-  "version": "1.3.11",
+  "version": "1.3.12",
   "description": "ONNX-powered G2P + phoneme-ASR inference for Node, Bun, and browsers.",
   "homepage": "https://hamalnp.org",
   "repository": {

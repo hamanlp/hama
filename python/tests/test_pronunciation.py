@@ -152,10 +152,58 @@ def test_pronunciation_replace_uses_weighted_interval_for_overlaps(fake_model: F
     assert result["stats"]["overlap_discarded"] == 1
 
 
-def test_pronunciation_scan_respects_token_boundaries(fake_model: FakeG2PModel):
+def test_pronunciation_scan_respects_token_boundaries_in_token_mode(fake_model: FakeG2PModel):
     result = pronunciation.pronunciation_scan(
         text="fooreillybar o reilly media",
         terms=[{"id": "oreilly_media", "text": "O'Reilly Media", "pronunciations": [["O", "REILLY", "MEDIA"]]}],
+        options={"span_unit": "token"},
     )
     assert len(result["matches"]) == 1
     assert result["matches"][0]["matched_text"] == "o reilly media"
+
+
+def test_pronunciation_scan_matches_inside_larger_token_by_default(fake_model: FakeG2PModel):
+    result = pronunciation.pronunciation_scan(
+        text="성민님이 왔다",
+        terms=[{"id": "seongmin", "text": "성민"}],
+    )
+    assert len(result["matches"]) == 1
+    assert result["matches"][0]["matched_text"] == "성민"
+    assert result["matches"][0]["start_token"] == 0
+    assert result["matches"][0]["end_token"] == 1
+
+
+def test_pronunciation_replace_ignores_whitespace_by_default(fake_model: FakeG2PModel):
+    result = pronunciation.pronunciation_replace(
+        text="성 민 님이 왔다",
+        terms=[{"id": "seongmin", "text": "성민"}],
+    )
+    assert result["text"] == "성민 님이 왔다"
+    assert len(result["applied"]) == 1
+    assert result["applied"][0]["matched_text"] == "성 민"
+
+
+def test_pronunciation_scan_skips_overlong_character_windows_before_g2p_truncation(
+    fake_model: FakeG2PModel,
+):
+    fake_model.get_max_input_len = lambda: 4
+    result = pronunciation.pronunciation_scan(
+        text="abcdef",
+        terms=[{"id": "abcdef", "text": "abcdef", "pronunciations": [["A", "B", "C", "D", "E", "F"]]}],
+        options={"word_boundary_mode": "strict"},
+    )
+    assert result["matches"] == []
+    assert result["stats"]["rejected_by_input_limit"] == 1
+
+
+def test_pronunciation_scan_skips_overlong_implicit_term_pronunciations_before_compilation(
+    fake_model: FakeG2PModel,
+):
+    fake_model.get_max_input_len = lambda: 4
+    result = pronunciation.pronunciation_scan(
+        text="abcdef",
+        terms=[{"id": "abcdef", "text": "abcdef"}],
+        options={"word_boundary_mode": "strict"},
+    )
+    assert result["matches"] == []
+    assert result["stats"]["rejected_by_input_limit"] == 1

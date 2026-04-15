@@ -9,9 +9,11 @@ import { G2PResult } from "../src/tokenizer";
 
 class FakePredictor implements PronunciationPredictor {
   private mapping: Map<string, string[]>;
+  private maxInputLen: number | null;
 
-  constructor(mapping: Record<string, string[]>) {
+  constructor(mapping: Record<string, string[]>, maxInputLen: number | null = null) {
     this.mapping = new Map(Object.entries(mapping));
+    this.maxInputLen = maxInputLen;
   }
 
   async predict(text: string): Promise<G2PResult> {
@@ -30,6 +32,10 @@ class FakePredictor implements PronunciationPredictor {
         charIndex: positions[Math.min(idx, positions.length - 1)],
       })),
     };
+  }
+
+  getMaxInputLen(): number | null {
+    return this.maxInputLen;
   }
 }
 
@@ -115,11 +121,55 @@ describe("pronunciation helpers", () => {
     expect(result.stats.overlapDiscarded).toBe(1);
   });
 
-  it("respects token boundaries", async () => {
+  it("respects token boundaries in token span mode", async () => {
     const result = await pronunciationScanWithModel(createModel(), "fooreillybar o reilly media", [
       { id: "oreilly_media", text: "O'Reilly Media", pronunciations: [["O", "REILLY", "MEDIA"]] },
-    ]);
+    ], {
+      spanUnit: "token",
+    });
     expect(result.matches).toHaveLength(1);
     expect(result.matches[0].matchedText).toBe("o reilly media");
+  });
+
+  it("matches inside a larger token by default", async () => {
+    const result = await pronunciationScanWithModel(createModel(), "성민님이 왔다", [
+      { id: "seongmin", text: "성민" },
+    ]);
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0].matchedText).toBe("성민");
+    expect(result.matches[0].startToken).toBe(0);
+    expect(result.matches[0].endToken).toBe(1);
+  });
+
+  it("ignores whitespace by default", async () => {
+    const result = await pronunciationReplaceWithModel(createModel(), "성 민 님이 왔다", [
+      { id: "seongmin", text: "성민" },
+    ]);
+    expect(result.text).toBe("성민 님이 왔다");
+    expect(result.applied).toHaveLength(1);
+    expect(result.applied[0].matchedText).toBe("성 민");
+  });
+
+  it("skips overlong character windows before G2P truncation", async () => {
+    const result = await pronunciationScanWithModel(new FakePredictor({}, 4), "abcdef", [
+      { id: "abcdef", text: "abcdef", pronunciations: [["A", "B", "C", "D", "E", "F"]] },
+    ], {
+      wordBoundaryMode: "strict",
+    });
+    expect(result.matches).toHaveLength(0);
+    expect(result.stats.rejectedByInputLimit).toBe(1);
+  });
+
+  it("skips overlong implicit term pronunciations before compilation", async () => {
+    const result = await pronunciationScanWithModel(
+      new FakePredictor({ abcdef: ["A", "B", "C", "D", "E", "F"] }, 4),
+      "abcdef",
+      [{ id: "abcdef", text: "abcdef" }],
+      {
+        wordBoundaryMode: "strict",
+      },
+    );
+    expect(result.matches).toHaveLength(0);
+    expect(result.stats.rejectedByInputLimit).toBe(1);
   });
 });

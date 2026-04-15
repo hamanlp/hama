@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.3.12 - 2026-04-15
+
+- Made character-span pronunciation matching the default in both runtimes.
+- Default matching now ignores whitespace inside the candidate span and can match inside larger tokens while preserving original-input offsets and replacement behavior.
+- Character-span matching now skips candidate windows and implicit term pronunciations that would exceed the G2P encoder input limit instead of silently truncating them.
+- Kept explicit token-span behavior available:
+  - Python: `options={"span_unit": "token"}`
+  - TypeScript: `options={ spanUnit: "token" }`
+- Added Python and TypeScript coverage for default matching of `성민` inside `성민님이`, whitespace-insensitive `성 민` matching, explicit token-mode boundary behavior, and overlong-input guardrails.
+- Aligned Python `hama` and TypeScript `hama-js` on version `1.3.12`.
+
 ## v1.3.11 - 2026-04-15
 
 - Added pronunciation-aware transcript correction APIs in both runtimes:

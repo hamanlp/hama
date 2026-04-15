@@ -1,3 +1,4 @@
+import { splitTextToJamo } from "./jamo.js";
 import { G2PResult, PreserveLiteralsMode } from "./tokenizer.js";
 
 export interface PronunciationTerm {
@@ -11,6 +12,7 @@ export interface PronunciationTerm {
 
 export interface PronunciationScanOptions {
   language?: string;
+  spanUnit?: "token" | "character";
   maxDistanceRatio?: number;
   minDistance?: number;
   maxDistance?: number | null;
@@ -58,6 +60,7 @@ export interface PronunciationScanStats {
   candidateVariantsVerified?: number;
   matchesReturned?: number;
   rejectedByLength?: number;
+  rejectedByInputLimit?: number;
   rejectedByQgram?: number;
   rejectedByDistance?: number;
 }
@@ -69,6 +72,7 @@ export interface PronunciationScanResult {
 
 export interface PronunciationReplaceOptions {
   language?: string;
+  spanUnit?: "token" | "character";
   maxDistanceRatio?: number;
   minDistance?: number;
   maxDistance?: number | null;
@@ -164,10 +168,12 @@ export interface PronunciationPredictor {
       preserveLiterals?: PreserveLiteralsMode;
     },
   ): Promise<G2PResult>;
+  getMaxInputLen?(): number | null;
 }
 
 const DEFAULT_SCAN_OPTIONS: Required<PronunciationScanOptions> = {
   language: "en",
+  spanUnit: "character",
   maxDistanceRatio: 0.2,
   minDistance: 0,
   maxDistance: null,
@@ -189,6 +195,7 @@ const DEFAULT_SCAN_OPTIONS: Required<PronunciationScanOptions> = {
 
 const DEFAULT_REPLACE_OPTIONS: Required<PronunciationReplaceOptions> = {
   language: "en",
+  spanUnit: "character",
   maxDistanceRatio: 0.2,
   minDistance: 0,
   maxDistance: null,
@@ -237,6 +244,14 @@ interface InternalToken {
   phoneTokens: string[];
 }
 
+interface InternalCharacterUnit {
+  startChar: number;
+  endChar: number;
+  startCodeUnit: number;
+  endCodeUnit: number;
+  tokenIndex: number;
+}
+
 interface InternalTermVariant {
   variantId: number;
   termId: string | null;
@@ -267,6 +282,13 @@ interface InternalWindow {
   phoneTokens: string[];
 }
 
+interface PredictorInputLimitCarrier {
+  maxInputLen?: number;
+  options?: {
+    maxInputLen?: number;
+  };
+}
+
 export async function pronunciationScanWithModel(
   model: PronunciationPredictor,
   text: string,
@@ -281,12 +303,35 @@ export async function pronunciationScanWithModel(
   const phoneEncoder = new PhoneEncoder();
   const qgramEncoder = new QGramEncoder();
   const tokens = await prepareTokens(text, model, merged, phoneEncoder);
-  const compiled = await compileVariants(terms, model, merged, phoneEncoder, qgramEncoder);
+  const maxInputLen = resolvePredictorMaxInputLen(model);
+  const compiled = await compileVariants(
+    terms,
+    model,
+    merged,
+    phoneEncoder,
+    qgramEncoder,
+    maxInputLen,
+  );
+  const baseStats = emptyScanStats(tokens.length);
+  baseStats.rejectedByInputLimit = compiled.rejectedByInputLimit;
   if (compiled.variants.length === 0) {
-    return { matches: [], stats: emptyScanStats(tokens.length) };
+    return { matches: [], stats: baseStats };
   }
 
-  const { matches, stats } = scanCompiled(text, tokens, compiled, merged, qgramEncoder);
+  const { matches, stats } =
+    merged.spanUnit === "character"
+      ? await scanCompiledByCharacters(
+          text,
+          tokens,
+          compiled,
+          merged,
+          qgramEncoder,
+          model,
+          phoneEncoder,
+          maxInputLen,
+        )
+      : scanCompiled(text, tokens, compiled, merged, qgramEncoder);
+  stats.rejectedByInputLimit = (stats.rejectedByInputLimit ?? 0) + compiled.rejectedByInputLimit;
   const resolved = resolveScanMatches(matches, merged.resolveOverlaps);
   stats.matchesReturned = resolved.length;
   return { matches: resolved, stats };
@@ -372,6 +417,7 @@ const emptyScanStats = (tokenCount: number): PronunciationScanStats => ({
   candidateVariantsVerified: 0,
   matchesReturned: 0,
   rejectedByLength: 0,
+  rejectedByInputLimit: 0,
   rejectedByQgram: 0,
   rejectedByDistance: 0,
 });
@@ -397,6 +443,9 @@ const compactSurface = (text: string): string =>
   text.replace(/ /gu, "").replace(/-/gu, "").replace(/'/gu, "");
 
 const isWordChar = (ch: string): boolean => /\p{L}|\p{N}/u.test(ch);
+
+const characterUnitCount = (text: string): number =>
+  toCodePoints(text).filter((codePoint) => isWordChar(codePoint.ch)).length;
 
 const toCodePoints = (text: string): CodePointInfo[] => {
   const result: CodePointInfo[] = [];
@@ -504,20 +553,53 @@ const prepareTokens = async (
   return prepared;
 };
 
+const buildCharacterUnits = (
+  text: string,
+  tokens: InternalToken[],
+): InternalCharacterUnit[] => {
+  const codePoints = toCodePoints(text);
+  const units: InternalCharacterUnit[] = [];
+  let tokenIndex = 0;
+  for (const codePoint of codePoints) {
+    if (!isWordChar(codePoint.ch)) continue;
+    while (tokenIndex < tokens.length && codePoint.charIndex >= tokens[tokenIndex].endChar) {
+      tokenIndex += 1;
+    }
+    if (tokenIndex >= tokens.length) break;
+    if (
+      codePoint.charIndex < tokens[tokenIndex].startChar ||
+      codePoint.charIndex >= tokens[tokenIndex].endChar
+    ) {
+      continue;
+    }
+    units.push({
+      startChar: codePoint.charIndex,
+      endChar: codePoint.charIndex + 1,
+      startCodeUnit: codePoint.codeUnitStart,
+      endCodeUnit: codePoint.codeUnitEnd,
+      tokenIndex,
+    });
+  }
+  return units;
+};
+
 const compileVariants = async (
   terms: Array<string | PronunciationTerm>,
   model: PronunciationPredictor,
   options: Required<PronunciationScanOptions>,
   phoneEncoder: PhoneEncoder,
   qgramEncoder: QGramEncoder,
+  maxInputLen: number | null,
 ): Promise<{
   variants: InternalTermVariant[];
   byTokenCount: Map<number, InternalTermVariant[]>;
   indexByTokenCount: Map<number, Map<number, Array<[number, number]>>>;
+  rejectedByInputLimit: number;
 }> => {
   const variants: InternalTermVariant[] = [];
   const byTokenCount = new Map<number, InternalTermVariant[]>();
   const indexByTokenCount = new Map<number, Map<number, Array<[number, number]>>>();
+  let rejectedByInputLimit = 0;
   let variantId = 0;
 
   for (const rawTerm of terms) {
@@ -528,12 +610,23 @@ const compileVariants = async (
     }
     for (const [surfaceText, aliasText] of surfaces) {
       const surfaceNorm = normalizeForMatch(surfaceText);
-      const tokenCount = tokenizeWithOffsets(surfaceText).length || Math.max(1, surfaceNorm.split(" ").filter(Boolean).length);
+      const tokenCount =
+        options.spanUnit === "character"
+          ? Math.max(1, characterUnitCount(surfaceText))
+          : tokenizeWithOffsets(surfaceText).length || Math.max(1, surfaceNorm.split(" ").filter(Boolean).length);
       const pronunciationInputs =
         term.pronunciations.length > 0
           ? term.pronunciations.slice(0, options.maxTermPronunciations)
           : [null];
       for (const pronunciationInput of pronunciationInputs) {
+        if (
+          pronunciationInput == null &&
+          maxInputLen != null &&
+          estimatePredictorInputLength(surfaceNorm) > maxInputLen
+        ) {
+          rejectedByInputLimit += 1;
+          continue;
+        }
         const phoneTokens =
           pronunciationInput == null
             ? await phonemizeText(surfaceNorm, model)
@@ -581,7 +674,7 @@ const compileVariants = async (
       }
     }
   }
-  return { variants, byTokenCount, indexByTokenCount };
+  return { variants, byTokenCount, indexByTokenCount, rejectedByInputLimit };
 };
 
 const scanCompiled = (
@@ -611,6 +704,138 @@ const scanCompiled = (
       if (endToken > tokens.length) continue;
       stats.windowCount = (stats.windowCount ?? 0) + 1;
       const window = buildWindow(text, tokens, startToken, endToken);
+      const relevantCounts = candidateTokenBuckets(windowLength, tokenCounts, options);
+      if (relevantCounts.length === 0) continue;
+
+      const lengthOkIds = new Set<number>();
+      for (const count of relevantCounts) {
+        for (const variant of compiled.byTokenCount.get(count) ?? []) {
+          if (Math.abs(window.phones.length - variant.phoneLen) > variant.thresholdK) {
+            stats.rejectedByLength = (stats.rejectedByLength ?? 0) + 1;
+            continue;
+          }
+          lengthOkIds.add(variant.variantId);
+        }
+      }
+      if (lengthOkIds.size === 0) continue;
+
+      stats.candidateVariantsConsidered = (stats.candidateVariantsConsidered ?? 0) + lengthOkIds.size;
+      const windowQfreq = qgramFrequency(window.phones, options.qgramSize, qgramEncoder);
+      const candidateOverlap = new Map<number, number>();
+      for (const count of relevantCounts) {
+        const postings = compiled.indexByTokenCount.get(count) ?? new Map();
+        for (const [qgramId, windowCount] of windowQfreq.entries()) {
+          for (const [variantId, termCount] of postings.get(qgramId) ?? []) {
+            if (!lengthOkIds.has(variantId)) continue;
+            candidateOverlap.set(
+              variantId,
+              (candidateOverlap.get(variantId) ?? 0) + Math.min(windowCount, termCount),
+            );
+          }
+        }
+      }
+
+      const verifiedIds: number[] = [];
+      for (const variantId of [...lengthOkIds].sort((a, b) => a - b)) {
+        const variant = variantById.get(variantId)!;
+        const required = requiredOverlap(variant.phoneLen, window.phones.length, options.qgramSize, variant.thresholdK);
+        if ((candidateOverlap.get(variantId) ?? 0) < required) {
+          stats.rejectedByQgram = (stats.rejectedByQgram ?? 0) + 1;
+          continue;
+        }
+        verifiedIds.push(variantId);
+      }
+      if (verifiedIds.length === 0) continue;
+
+      stats.candidateVariantsVerified = (stats.candidateVariantsVerified ?? 0) + verifiedIds.length;
+      for (const variantId of verifiedIds) {
+        const variant = variantById.get(variantId)!;
+        const distance = verifyDistance(variant.phones, window.phones, variant.thresholdK, options.verifier);
+        if (distance == null) {
+          stats.rejectedByDistance = (stats.rejectedByDistance ?? 0) + 1;
+          continue;
+        }
+        const phonemeSimilarity = similarity(distance, variant.phones.length, window.phones.length);
+        const textDistance = levenshteinDistance(variant.surfaceCompact, window.surfaceCompact);
+        const textSimilarity = similarity(textDistance, variant.surfaceCompact.length, window.surfaceCompact.length);
+        const score =
+          options.scoring === "phoneme"
+            ? phonemeSimilarity
+            : options.phonemeWeight * phonemeSimilarity + options.textWeight * textSimilarity;
+        if (score < options.minScore) continue;
+
+        rawMatches.push({
+          termId: variant.termId,
+          termText: variant.termText,
+          canonical: variant.canonical,
+          aliasText: variant.aliasText,
+          matchedText: window.matchedText,
+          startChar: window.startChar,
+          endChar: window.endChar,
+          startToken: window.startToken,
+          endToken: window.endToken,
+          score,
+          phonemeDistance: distance,
+          phonemeThreshold: variant.thresholdK,
+          phonemeSimilarity,
+          textDistance,
+          textSimilarity,
+          termPronunciation: options.returnPhonemes ? [...variant.phoneTokens] : null,
+          matchedPronunciation: options.returnPhonemes ? [...window.phoneTokens] : null,
+          metadata: variant.metadata,
+        });
+      }
+    }
+  }
+
+  return { matches: dedupeScanMatches(rawMatches), stats };
+};
+
+const scanCompiledByCharacters = async (
+  text: string,
+  tokens: InternalToken[],
+  compiled: {
+    variants: InternalTermVariant[];
+    byTokenCount: Map<number, InternalTermVariant[]>;
+    indexByTokenCount: Map<number, Map<number, Array<[number, number]>>>;
+  },
+  options: Required<PronunciationScanOptions>,
+  qgramEncoder: QGramEncoder,
+  model: PronunciationPredictor,
+  phoneEncoder: PhoneEncoder,
+  maxInputLen: number | null,
+): Promise<{ matches: PronunciationMatch[]; stats: PronunciationScanStats }> => {
+  const stats = emptyScanStats(tokens.length);
+  const charUnits = buildCharacterUnits(text, tokens);
+  if (compiled.variants.length === 0 || charUnits.length === 0) {
+    return { matches: [], stats };
+  }
+
+  const tokenCounts = [...compiled.byTokenCount.keys()].sort((a, b) => a - b);
+  const variantById = new Map(compiled.variants.map((variant) => [variant.variantId, variant] as const));
+  const lengths = windowLengths(tokenCounts, options);
+  const rawMatches: PronunciationMatch[] = [];
+  const windowCache = new Map<string, { phoneTokens: string[]; phones: number[]; surfaceNorm: string } | null>();
+
+  for (let startUnit = 0; startUnit < charUnits.length; startUnit += 1) {
+    for (const windowLength of lengths) {
+      const endUnit = startUnit + windowLength;
+      if (endUnit > charUnits.length) continue;
+      stats.windowCount = (stats.windowCount ?? 0) + 1;
+      const window = await buildCharacterWindow(
+        text,
+        charUnits,
+        startUnit,
+        endUnit,
+        model,
+        phoneEncoder,
+        windowCache,
+        maxInputLen,
+      );
+      if (!window) {
+        stats.rejectedByInputLimit = (stats.rejectedByInputLimit ?? 0) + 1;
+        continue;
+      }
       const relevantCounts = candidateTokenBuckets(windowLength, tokenCounts, options);
       if (relevantCounts.length === 0) continue;
 
@@ -751,6 +976,77 @@ const buildWindow = (
     phones,
     phoneTokens,
   };
+};
+
+const buildCharacterWindow = async (
+  text: string,
+  charUnits: InternalCharacterUnit[],
+  startUnit: number,
+  endUnit: number,
+  model: PronunciationPredictor,
+  phoneEncoder: PhoneEncoder,
+  cache: Map<string, { phoneTokens: string[]; phones: number[]; surfaceNorm: string } | null>,
+  maxInputLen: number | null,
+): Promise<InternalWindow | null> => {
+  const first = charUnits[startUnit];
+  const last = charUnits[endUnit - 1];
+  const matchedText = text.slice(first.startCodeUnit, last.endCodeUnit);
+  const surfaceNorm = normalizeForMatch(matchedText);
+  const cacheKey = surfaceNorm || matchedText;
+  if (!cache.has(cacheKey)) {
+    if (maxInputLen != null && estimatePredictorInputLength(surfaceNorm || matchedText) > maxInputLen) {
+      cache.set(cacheKey, null);
+      return null;
+    }
+    const phoneTokens = await phonemizeText(surfaceNorm || matchedText, model);
+    cache.set(cacheKey, {
+      surfaceNorm,
+      phoneTokens,
+      phones: phoneTokens.map((phone) => phoneEncoder.encode(phone)),
+    });
+  }
+  const cached = cache.get(cacheKey);
+  if (!cached) return null;
+  return {
+    startToken: first.tokenIndex,
+    endToken: last.tokenIndex + 1,
+    startChar: first.startChar,
+    endChar: last.endChar,
+    matchedText,
+    surfaceNorm: cached.surfaceNorm,
+    surfaceCompact: compactSurface(cached.surfaceNorm),
+    phones: [...cached.phones],
+    phoneTokens: [...cached.phoneTokens],
+  };
+};
+
+const resolvePredictorMaxInputLen = (
+  model: PronunciationPredictor,
+): number | null => {
+  if (typeof model.getMaxInputLen === "function") {
+    const value = model.getMaxInputLen();
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return Math.trunc(value);
+    }
+  }
+  const carrier = model as PronunciationPredictor & PredictorInputLimitCarrier;
+  if (
+    typeof carrier.maxInputLen === "number" &&
+    Number.isFinite(carrier.maxInputLen) &&
+    carrier.maxInputLen > 0
+  ) {
+    return Math.trunc(carrier.maxInputLen);
+  }
+  const optionValue = carrier.options?.maxInputLen;
+  if (typeof optionValue === "number" && Number.isFinite(optionValue) && optionValue > 0) {
+    return Math.trunc(optionValue);
+  }
+  return null;
+};
+
+const estimatePredictorInputLength = (text: string): number => {
+  const sequence = splitTextToJamo(text);
+  return sequence.tokens.length > 0 ? sequence.tokens.length : 1;
 };
 
 const requiredOverlap = (termLen: number, windowLen: number, q: number, thresholdK: number): number =>
