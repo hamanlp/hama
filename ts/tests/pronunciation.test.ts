@@ -10,6 +10,7 @@ import { G2PResult } from "../src/tokenizer";
 class FakePredictor implements PronunciationPredictor {
   private mapping: Map<string, string[]>;
   private maxInputLen: number | null;
+  predictCalls = 0;
 
   constructor(mapping: Record<string, string[]>, maxInputLen: number | null = null) {
     this.mapping = new Map(Object.entries(mapping));
@@ -17,7 +18,14 @@ class FakePredictor implements PronunciationPredictor {
   }
 
   async predict(text: string): Promise<G2PResult> {
-    const phones = this.mapping.get(text) ?? Array.from(text).filter((ch) => !/\s/u.test(ch));
+    this.predictCalls += 1;
+    // Uppercase fallback keeps fake phones distinct from their source
+    // characters so the spell-out (letter identity) guard does not trip.
+    const phones =
+      this.mapping.get(text)
+      ?? Array.from(text)
+        .filter((ch) => !/\s/u.test(ch))
+        .map((ch) => ch.toUpperCase());
     const visible = Array.from(text)
       .map((ch, idx) => ({ ch, idx }))
       .filter(({ ch }) => !/\s/u.test(ch))
@@ -148,6 +156,28 @@ describe("pronunciation helpers", () => {
     expect(result.text).toBe("성민 님이 왔다");
     expect(result.applied).toHaveLength(1);
     expect(result.applied[0].matchedText).toBe("성 민");
+  });
+
+  it("matches inside a larger latin token in character mode", async () => {
+    const result = await pronunciationScanWithModel(
+      createModel(),
+      "the supersallyridearchive file",
+      [{ id: "sally_ride", text: "Sally Ride" }],
+    );
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0].matchedText).toBe("sallyride");
+  });
+
+  it("prefilters non-matching windows without invoking the predictor", async () => {
+    const model = createModel();
+    const text = "the quick brown fox jumped over the lazy dog near the river bank";
+    const result = await pronunciationScanWithModel(model, text, [
+      { id: "john_smythe", text: "John Smythe" },
+    ]);
+    expect(result.matches).toHaveLength(0);
+    // Unique tokens (11) + the term itself (1). Before the alignment-based
+    // prefilter this also ran one G2P call per candidate character window.
+    expect(model.predictCalls).toBeLessThanOrEqual(12);
   });
 
   it("skips overlong character windows before G2P truncation", async () => {

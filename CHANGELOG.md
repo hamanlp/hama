@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.3.13 - 2026-06-10
+
+- Sped up character-span pronunciation matching by 4-40x in both runtimes. Candidate windows are now pre-screened with approximate phonemes sliced from each token's character alignments (length, q-gram, and banded edit-distance filters with slack), so the G2P model only runs on windows that plausibly match.
+- Kept the exact verification path unchanged: surviving windows are still phonemized for real and verified with the same thresholds. Tokens whose pronunciations cannot be sliced reliably (spell-out mode, truncated alignments, non-compositional normalization) fall back to per-window G2P.
+- Pronunciation matching now ignores literal separator tokens that some languages decode between phonemes, so they no longer inflate phoneme edit distances.
+- Verified byte-identical scan/replace output on the demo example set in both runtimes before/after the change. Note: `stats` counters (window/rejection counts) reflect the new filter order and may differ from v1.3.12.
+- Added Python and TypeScript coverage for sub-token latin matching through the prefilter and for the predictor-call budget.
+- Aligned Python `hama` and TypeScript `hama-js` on version `1.3.13`.
+
 ## v1.3.12 - 2026-04-15
 
 - Made character-span pronunciation matching the default in both runtimes.

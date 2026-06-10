@@ -256,6 +256,11 @@ class _Token:
     end_char: int
     phones: list[int]
     phone_tokens: list[str]
+    # Encoded phones bucketed per raw character of the token, derived from the
+    # predictor's character alignments. Used to build approximate phoneme
+    # sequences for candidate character windows without re-running G2P.
+    # None when raw->normalized character offsets cannot be mapped reliably.
+    char_phones: list[list[int]] | None = None
 
 
 @dataclass
@@ -520,17 +525,17 @@ def _prepare_tokens(
     options: PronunciationScanOptions,
     phone_encoder: "_PhoneEncoder",
 ) -> list[_Token]:
-    token_cache: dict[str, tuple[list[str], list[int]]] = {}
+    token_cache: dict[str, tuple[list[str], list[int], list[int]]] = {}
     prepared: list[_Token] = []
     for raw_text, start_char, end_char in _tokenize_with_offsets(text):
         norm_text = _normalize_for_match(raw_text)
         cache_key = norm_text or raw_text
         if cache_key in token_cache:
-            phone_tokens, phones = token_cache[cache_key]
+            phone_tokens, phones, char_indexes = token_cache[cache_key]
         else:
-            phone_tokens = _phonemize_text(norm_text or raw_text, model=model)
+            phone_tokens, char_indexes = _phonemize_text_aligned(norm_text or raw_text, model=model)
             phones = [phone_encoder.encode(phone) for phone in phone_tokens]
-            token_cache[cache_key] = (phone_tokens, phones)
+            token_cache[cache_key] = (phone_tokens, phones, char_indexes)
         prepared.append(
             _Token(
                 raw_text=raw_text,
@@ -539,6 +544,13 @@ def _prepare_tokens(
                 end_char=end_char,
                 phones=list(phones),
                 phone_tokens=list(phone_tokens),
+                char_phones=_build_token_char_phones(
+                    raw_text=raw_text,
+                    norm_text=norm_text,
+                    phones=phones,
+                    phone_tokens=phone_tokens,
+                    char_indexes=char_indexes,
+                ),
             )
         )
     return prepared
@@ -790,12 +802,100 @@ def _scan_compiled_by_characters(
     raw_matches: list[PronunciationMatch] = []
     window_cache: dict[str, tuple[str, list[str], list[int]] | None] = {}
 
+    # Approximate phones per character unit, sliced out of each token's
+    # alignment buckets. They let us reject the vast majority of candidate
+    # windows with cheap filters before paying for a real G2P inference.
+    unit_phones: list[list[int] | None] = []
+    for unit in char_units:
+        token = tokens[unit.token_index]
+        if token.char_phones is None:
+            unit_phones.append(None)
+        else:
+            offset = unit.start_char - token.start_char
+            unit_phones.append(token.char_phones[offset] if 0 <= offset < len(token.char_phones) else None)
+    prefix_phone_counts = [0]
+    prefix_unmappable = [0]
+    for phones_for_unit in unit_phones:
+        prefix_phone_counts.append(prefix_phone_counts[-1] + (len(phones_for_unit) if phones_for_unit is not None else 0))
+        prefix_unmappable.append(prefix_unmappable[-1] + (0 if phones_for_unit is not None else 1))
+
+    def _approx_slack(variant: _TermVariant) -> int:
+        # Concatenated per-character phones approximate the true G2P output of
+        # the window text, so widen every threshold by this slack before
+        # discarding a window without verification.
+        return max(2, math.ceil(variant.phone_len * 0.25))
+
     for start_unit in range(len(char_units)):
         for window_length in lengths:
             end_unit = start_unit + window_length
             if end_unit > len(char_units):
                 continue
             stats["window_count"] += 1
+
+            first_unit = char_units[start_unit]
+            last_unit = char_units[end_unit - 1]
+            window_text = text[first_unit.start_char : last_unit.end_char]
+            window_norm = _normalize_for_match(window_text)
+            if (
+                max_input_len is not None
+                and _estimate_predictor_input_length(window_norm or window_text) > max_input_len
+            ):
+                stats["rejected_by_input_limit"] += 1
+                continue
+
+            relevant_counts = _candidate_token_buckets(window_length, term_token_counts, options)
+            if not relevant_counts:
+                continue
+
+            # Alignment-based prefilter: only windows that plausibly match some
+            # variant (under slackened thresholds) reach the predictor.
+            window_mappable = prefix_unmappable[end_unit] - prefix_unmappable[start_unit] == 0
+            if window_mappable:
+                approx_len = prefix_phone_counts[end_unit] - prefix_phone_counts[start_unit]
+                approx_length_rejected = 0
+                approx_qgram_rejected = 0
+                approx_distance_rejected = 0
+                length_ok_variants: list[_TermVariant] = []
+                for token_bucket in relevant_counts:
+                    for variant in variants_by_token_count.get(token_bucket, []):
+                        if abs(approx_len - variant.phone_len) > variant.threshold_k + _approx_slack(variant):
+                            approx_length_rejected += 1
+                            continue
+                        length_ok_variants.append(variant)
+                plausible = False
+                if length_ok_variants:
+                    approx_phones: list[int] = []
+                    for unit_index in range(start_unit, end_unit):
+                        approx_phones.extend(unit_phones[unit_index] or ())
+                    approx_qfreq = _qgram_frequency(approx_phones, options["qgram_size"], qgram_encoder)
+                    for variant in length_ok_variants:
+                        slack_k = variant.threshold_k + _approx_slack(variant)
+                        required = _required_overlap(
+                            term_len=variant.phone_len,
+                            window_len=len(approx_phones),
+                            q=options["qgram_size"],
+                            threshold_k=slack_k,
+                        )
+                        if _qgram_overlap(approx_qfreq, variant.qgram_freq) < required:
+                            approx_qgram_rejected += 1
+                            continue
+                        if _verify_distance(
+                            pattern=variant.phones,
+                            text=approx_phones,
+                            threshold_k=slack_k,
+                            verifier=options["verifier"],
+                        ) is None:
+                            approx_distance_rejected += 1
+                            continue
+                        plausible = True
+                        break
+                if not plausible:
+                    stats["candidate_variants_considered"] += len(length_ok_variants)
+                    stats["rejected_by_length"] += approx_length_rejected
+                    stats["rejected_by_qgram"] += approx_qgram_rejected
+                    stats["rejected_by_distance"] += approx_distance_rejected
+                    continue
+
             window = _build_character_window(
                 text=text,
                 char_units=char_units,
@@ -808,9 +908,6 @@ def _scan_compiled_by_characters(
             )
             if window is None:
                 stats["rejected_by_input_limit"] += 1
-                continue
-            relevant_counts = _candidate_token_buckets(window_length, term_token_counts, options)
-            if not relevant_counts:
                 continue
 
             length_ok_ids: set[int] = set()
@@ -1493,16 +1590,96 @@ def _coerce_term(term: str | PronunciationTerm) -> PronunciationTerm:
 
 
 def _phonemize_text(text: str, model: Any) -> list[str]:
+    phone_tokens, _char_indexes = _phonemize_text_aligned(text, model=model)
+    return phone_tokens
+
+
+def _phonemize_text_aligned(text: str, model: Any) -> tuple[list[str], list[int]]:
+    """Phonemize text, keeping the normalized-input character index per phone."""
     normalized = _normalize_for_match(text)
-    fallback = _pseudo_phones(normalized)
+    fallback = _pseudo_phones_aligned(normalized)
     if not normalized:
         return fallback
     try:
         result = model.predict(normalized, split_delimiter=None, output_delimiter="", preserve_literals="none")
     except Exception:
         return fallback
-    phones = [alignment.phoneme for alignment in result.alignments]
-    return phones or fallback
+    # Some languages decode with literal separator tokens between phonemes.
+    # They carry no pronunciation signal, so drop them before matching.
+    aligned = [alignment for alignment in result.alignments if alignment.phoneme.strip()]
+    if not aligned:
+        return fallback
+    return (
+        [alignment.phoneme for alignment in aligned],
+        [alignment.char_index for alignment in aligned],
+    )
+
+
+def _pseudo_phones_aligned(text: str) -> tuple[list[str], list[int]]:
+    """Mirrors _pseudo_phones but keeps the source character index per pseudo-phone."""
+    phone_tokens: list[str] = []
+    char_indexes: list[int] = []
+    for idx, ch in enumerate(text):
+        if ch.isspace() or ch in ("-", "'"):
+            continue
+        phone_tokens.append(ch)
+        char_indexes.append(idx)
+    if not phone_tokens:
+        return ["<unk>"], [-1]
+    return phone_tokens, char_indexes
+
+
+def _build_token_char_phones(
+    raw_text: str,
+    norm_text: str,
+    phones: Sequence[int],
+    phone_tokens: Sequence[str],
+    char_indexes: Sequence[int],
+) -> list[list[int]] | None:
+    """Bucket a token's encoded phones by raw character offset.
+
+    Returns None when the per-character mapping is unreliable: spell-out style
+    predictions (every phone is literally its source character), truncated
+    alignments, or non-compositional raw->normalized offsets.
+    """
+    if not raw_text:
+        return None
+    norm_len = len(norm_text)
+
+    # Spell-out mode: the predictor is naming letters, not pronouncing the
+    # word, so per-character slices would not approximate a sub-span.
+    letter_identity = len(phone_tokens) > 0
+    for phone, char_index in zip(phone_tokens, char_indexes):
+        if char_index < 0 or char_index >= norm_len or phone != norm_text[char_index]:
+            letter_identity = False
+            break
+    if letter_identity:
+        return None
+
+    # Trailing characters with no aligned phones usually mean the prediction
+    # was truncated; windows over the tail would look spuriously short.
+    max_aligned = max(char_indexes, default=-1)
+    if norm_len - 1 - max_aligned >= 3:
+        return None
+
+    cum = [0]
+    for ch in raw_text:
+        cum.append(cum[-1] + len(_normalize_for_match(ch)))
+    if cum[-1] != norm_len:
+        return None
+
+    buckets: list[list[int]] = [[] for _ in raw_text]
+    last_raw = len(raw_text) - 1
+    for phone, char_index in zip(phones, char_indexes):
+        if char_index < 0:
+            target = 0
+        elif char_index >= norm_len:
+            target = last_raw
+        else:
+            target = bisect.bisect_right(cum, char_index) - 1
+            target = min(max(target, 0), last_raw)
+        buckets[target].append(phone)
+    return buckets
 
 
 def _pseudo_phones(text: str) -> list[str]:
@@ -1538,6 +1715,16 @@ def _effective_threshold(
         if 4 <= length <= 6:
             return min(threshold, 1)
     return threshold
+
+
+def _qgram_overlap(left: Mapping[int, int], right: Mapping[int, int]) -> int:
+    small, large = (left, right) if len(left) <= len(right) else (right, left)
+    overlap = 0
+    for qgram_id, count in small.items():
+        other = large.get(qgram_id)
+        if other is not None:
+            overlap += min(count, other)
+    return overlap
 
 
 def _qgram_frequency(

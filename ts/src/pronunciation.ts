@@ -242,6 +242,13 @@ interface InternalToken {
   endCodeUnit: number;
   phones: number[];
   phoneTokens: string[];
+  /**
+   * Encoded phones bucketed per raw character of the token, derived from the
+   * predictor's character alignments. Used to build approximate phoneme
+   * sequences for candidate character windows without re-running G2P.
+   * Null when raw→normalized character offsets cannot be mapped reliably.
+   */
+  charPhones: number[][] | null;
 }
 
 interface InternalCharacterUnit {
@@ -525,17 +532,21 @@ const prepareTokens = async (
   options: Required<PronunciationScanOptions>,
   phoneEncoder: PhoneEncoder,
 ): Promise<InternalToken[]> => {
-  const tokenCache = new Map<string, { phoneTokens: string[]; phones: number[] }>();
+  const tokenCache = new Map<
+    string,
+    { phoneTokens: string[]; phones: number[]; charIndexes: number[] }
+  >();
   const prepared: InternalToken[] = [];
   for (const token of tokenizeWithOffsets(text)) {
     const normText = normalizeForMatch(token.rawText);
     const cacheKey = normText || token.rawText;
     let cached = tokenCache.get(cacheKey);
     if (!cached) {
-      const phoneTokens = await phonemizeText(normText || token.rawText, model);
+      const aligned = await phonemizeTextAligned(normText || token.rawText, model);
       cached = {
-        phoneTokens,
-        phones: phoneTokens.map((phone) => phoneEncoder.encode(phone)),
+        phoneTokens: aligned.phoneTokens,
+        phones: aligned.phoneTokens.map((phone) => phoneEncoder.encode(phone)),
+        charIndexes: aligned.charIndexes,
       };
       tokenCache.set(cacheKey, cached);
     }
@@ -548,6 +559,13 @@ const prepareTokens = async (
       endCodeUnit: token.endCodeUnit,
       phones: [...cached.phones],
       phoneTokens: [...cached.phoneTokens],
+      charPhones: buildTokenCharPhones(
+        token.rawText,
+        normText,
+        cached.phones,
+        cached.phoneTokens,
+        cached.charIndexes,
+      ),
     });
   }
   return prepared;
@@ -817,11 +835,103 @@ const scanCompiledByCharacters = async (
   const rawMatches: PronunciationMatch[] = [];
   const windowCache = new Map<string, { phoneTokens: string[]; phones: number[]; surfaceNorm: string } | null>();
 
+  // Approximate phones per character unit, sliced out of each token's
+  // alignment buckets. They let us reject the vast majority of candidate
+  // windows with pure-JS filters before paying for a real G2P inference.
+  const unitPhones: Array<number[] | null> = charUnits.map((unit) => {
+    const token = tokens[unit.tokenIndex];
+    if (!token.charPhones) return null;
+    return token.charPhones[unit.startChar - token.startChar] ?? null;
+  });
+  const prefixPhoneCounts: number[] = [0];
+  const prefixUnmappable: number[] = [0];
+  for (let idx = 0; idx < charUnits.length; idx += 1) {
+    const phones = unitPhones[idx];
+    prefixPhoneCounts.push(prefixPhoneCounts[idx] + (phones ? phones.length : 0));
+    prefixUnmappable.push(prefixUnmappable[idx] + (phones ? 0 : 1));
+  }
+  // Concatenated per-character phones approximate the true G2P output of the
+  // window text, so the prefilter widens every variant threshold by this slack
+  // before discarding a window without verification.
+  const approxSlackFor = (variant: InternalTermVariant): number =>
+    Math.max(2, Math.ceil(variant.phoneLen * 0.25));
+
   for (let startUnit = 0; startUnit < charUnits.length; startUnit += 1) {
     for (const windowLength of lengths) {
       const endUnit = startUnit + windowLength;
       if (endUnit > charUnits.length) continue;
       stats.windowCount = (stats.windowCount ?? 0) + 1;
+
+      const firstUnit = charUnits[startUnit];
+      const lastUnit = charUnits[endUnit - 1];
+      const windowText = text.slice(firstUnit.startCodeUnit, lastUnit.endCodeUnit);
+      const windowNorm = normalizeForMatch(windowText);
+      if (
+        maxInputLen != null &&
+        estimatePredictorInputLength(windowNorm || windowText) > maxInputLen
+      ) {
+        stats.rejectedByInputLimit = (stats.rejectedByInputLimit ?? 0) + 1;
+        continue;
+      }
+
+      const relevantCounts = candidateTokenBuckets(windowLength, tokenCounts, options);
+      if (relevantCounts.length === 0) continue;
+
+      // Alignment-based prefilter: only windows that plausibly match some
+      // variant (under slackened thresholds) are sent to the predictor.
+      const windowMappable = prefixUnmappable[endUnit] - prefixUnmappable[startUnit] === 0;
+      if (windowMappable) {
+        const approxLen = prefixPhoneCounts[endUnit] - prefixPhoneCounts[startUnit];
+        let approxLengthRejected = 0;
+        let approxQgramRejected = 0;
+        let approxDistanceRejected = 0;
+        const lengthOkVariants: InternalTermVariant[] = [];
+        for (const count of relevantCounts) {
+          for (const variant of compiled.byTokenCount.get(count) ?? []) {
+            if (Math.abs(approxLen - variant.phoneLen) > variant.thresholdK + approxSlackFor(variant)) {
+              approxLengthRejected += 1;
+              continue;
+            }
+            lengthOkVariants.push(variant);
+          }
+        }
+        let plausible = false;
+        if (lengthOkVariants.length > 0) {
+          const approxPhones: number[] = [];
+          for (let unit = startUnit; unit < endUnit; unit += 1) {
+            approxPhones.push(...unitPhones[unit]!);
+          }
+          const approxQfreq = qgramFrequency(approxPhones, options.qgramSize, qgramEncoder);
+          for (const variant of lengthOkVariants) {
+            const slackK = variant.thresholdK + approxSlackFor(variant);
+            const required = requiredOverlap(
+              variant.phoneLen,
+              approxPhones.length,
+              options.qgramSize,
+              slackK,
+            );
+            if (qgramOverlap(approxQfreq, variant.qgramFreq) < required) {
+              approxQgramRejected += 1;
+              continue;
+            }
+            if (verifyDistance(variant.phones, approxPhones, slackK, options.verifier) == null) {
+              approxDistanceRejected += 1;
+              continue;
+            }
+            plausible = true;
+            break;
+          }
+        }
+        if (!plausible) {
+          stats.candidateVariantsConsidered =
+            (stats.candidateVariantsConsidered ?? 0) + lengthOkVariants.length;
+          stats.rejectedByLength = (stats.rejectedByLength ?? 0) + approxLengthRejected;
+          stats.rejectedByQgram = (stats.rejectedByQgram ?? 0) + approxQgramRejected;
+          stats.rejectedByDistance = (stats.rejectedByDistance ?? 0) + approxDistanceRejected;
+          continue;
+        }
+      }
+
       const window = await buildCharacterWindow(
         text,
         charUnits,
@@ -836,8 +946,6 @@ const scanCompiledByCharacters = async (
         stats.rejectedByInputLimit = (stats.rejectedByInputLimit ?? 0) + 1;
         continue;
       }
-      const relevantCounts = candidateTokenBuckets(windowLength, tokenCounts, options);
-      if (relevantCounts.length === 0) continue;
 
       const lengthOkIds = new Set<number>();
       for (const count of relevantCounts) {
@@ -1562,8 +1670,22 @@ const phonemizeText = async (
   text: string,
   model: PronunciationPredictor,
 ): Promise<string[]> => {
+  const { phoneTokens } = await phonemizeTextAligned(text, model);
+  return phoneTokens;
+};
+
+interface AlignedPhonemization {
+  phoneTokens: string[];
+  /** Character index into the normalized input for each phone (-1 when unknown). */
+  charIndexes: number[];
+}
+
+const phonemizeTextAligned = async (
+  text: string,
+  model: PronunciationPredictor,
+): Promise<AlignedPhonemization> => {
   const normalized = normalizeForMatch(text);
-  const fallback = pseudoPhones(normalized);
+  const fallback = pseudoPhonesAligned(normalized);
   if (!normalized) return fallback;
   try {
     const result = await model.predict(normalized, {
@@ -1571,11 +1693,107 @@ const phonemizeText = async (
       outputDelimiter: "",
       preserveLiterals: "none",
     });
-    const phones = result.alignments.map((alignment) => alignment.phoneme);
-    return phones.length > 0 ? phones : fallback;
+    // Some languages decode with literal separator tokens between phonemes.
+    // They carry no pronunciation signal, so drop them before matching.
+    const aligned = result.alignments.filter(
+      (alignment) => alignment.phoneme.trim() !== "",
+    );
+    if (aligned.length === 0) return fallback;
+    return {
+      phoneTokens: aligned.map((alignment) => alignment.phoneme),
+      charIndexes: aligned.map((alignment) => alignment.charIndex),
+    };
   } catch {
     return fallback;
   }
+};
+
+/** Mirrors pseudoPhones but keeps the source character index per pseudo-phone. */
+const pseudoPhonesAligned = (text: string): AlignedPhonemization => {
+  const phoneTokens: string[] = [];
+  const charIndexes: number[] = [];
+  Array.from(text).forEach((ch, idx) => {
+    if (/\s/u.test(ch) || ch === "-" || ch === "'") return;
+    phoneTokens.push(ch);
+    charIndexes.push(idx);
+  });
+  if (phoneTokens.length === 0) {
+    return { phoneTokens: ["<unk>"], charIndexes: [-1] };
+  }
+  return { phoneTokens, charIndexes };
+};
+
+/**
+ * Buckets a token's encoded phones by raw character offset using the
+ * predictor's normalized-input character alignments. Returns null when the
+ * raw→normalized offset mapping is not compositional (per-character
+ * normalization lengths fail to add up to the normalized string).
+ */
+const buildTokenCharPhones = (
+  rawText: string,
+  normText: string,
+  phones: number[],
+  phoneTokens: string[],
+  charIndexes: number[],
+): number[][] | null => {
+  const rawChars = Array.from(rawText);
+  if (rawChars.length === 0) return null;
+  const normLen = Array.from(normText).length;
+
+  // Spell-out mode: when every phone is literally its source character the
+  // predictor is naming letters, not pronouncing the word, so per-character
+  // slices would not approximate how a sub-span is actually pronounced.
+  const normChars = Array.from(normText);
+  let letterIdentity = phoneTokens.length > 0;
+  for (let idx = 0; idx < phoneTokens.length && letterIdentity; idx += 1) {
+    const charIndex = charIndexes[idx];
+    if (charIndex < 0 || charIndex >= normChars.length || phoneTokens[idx] !== normChars[charIndex]) {
+      letterIdentity = false;
+    }
+  }
+  if (letterIdentity) return null;
+  // Trailing characters with no aligned phones usually mean the prediction was
+  // truncated; windows over the tail would look spuriously short.
+  let maxAligned = -1;
+  for (const charIndex of charIndexes) {
+    if (charIndex > maxAligned) maxAligned = charIndex;
+  }
+  if (normLen - 1 - maxAligned >= 3) return null;
+
+  const cum: number[] = [0];
+  for (const ch of rawChars) {
+    cum.push(cum[cum.length - 1] + Array.from(normalizeForMatch(ch)).length);
+  }
+  if (cum[cum.length - 1] !== normLen) return null;
+
+  const buckets: number[][] = rawChars.map(() => []);
+  for (let idx = 0; idx < phones.length; idx += 1) {
+    const charIndex = charIndexes[idx] ?? -1;
+    let target: number;
+    if (charIndex < 0) {
+      target = 0;
+    } else if (charIndex >= normLen) {
+      target = rawChars.length - 1;
+    } else {
+      let lo = 0;
+      let hi = rawChars.length - 1;
+      target = rawChars.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (cum[mid] <= charIndex && charIndex < cum[mid + 1]) {
+          target = mid;
+          break;
+        }
+        if (charIndex < cum[mid]) {
+          hi = mid - 1;
+        } else {
+          lo = mid + 1;
+        }
+      }
+    }
+    buckets[target].push(phones[idx]);
+  }
+  return buckets;
 };
 
 const pseudoPhones = (text: string): string[] => {
@@ -1609,6 +1827,19 @@ const effectiveThreshold = (
     if (length <= 6) return Math.min(threshold, 1);
   }
   return threshold;
+};
+
+const qgramOverlap = (
+  left: Map<number, number>,
+  right: Map<number, number>,
+): number => {
+  const [small, large] = left.size <= right.size ? [left, right] : [right, left];
+  let overlap = 0;
+  for (const [qgramId, count] of small.entries()) {
+    const other = large.get(qgramId);
+    if (other != null) overlap += Math.min(count, other);
+  }
+  return overlap;
 };
 
 const qgramFrequency = (

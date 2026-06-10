@@ -11,6 +11,7 @@ from hama.inference import G2PAlignment, G2PResult
 class FakeG2PModel:
     def __init__(self, mapping: dict[str, Sequence[str]]):
         self.mapping = {key: list(value) for key, value in mapping.items()}
+        self.predict_calls = 0
 
     def predict(
         self,
@@ -19,7 +20,12 @@ class FakeG2PModel:
         output_delimiter: str = "",
         preserve_literals: str = "none",
     ) -> G2PResult:
-        phones = list(self.mapping.get(text, [ch for ch in text if not ch.isspace()] or ["<unk>"]))
+        self.predict_calls += 1
+        # Uppercase fallback keeps fake phones distinct from their source
+        # characters so the spell-out (letter identity) guard does not trip.
+        phones = list(
+            self.mapping.get(text, [ch.upper() for ch in text if not ch.isspace()] or ["<unk>"])
+        )
         visible_indices = [idx for idx, ch in enumerate(text) if not ch.isspace()]
         if not visible_indices:
             visible_indices = [-1]
@@ -181,6 +187,27 @@ def test_pronunciation_replace_ignores_whitespace_by_default(fake_model: FakeG2P
     assert result["text"] == "성민 님이 왔다"
     assert len(result["applied"]) == 1
     assert result["applied"][0]["matched_text"] == "성 민"
+
+
+def test_pronunciation_scan_matches_inside_larger_latin_token(fake_model: FakeG2PModel):
+    result = pronunciation.pronunciation_scan(
+        text="the supersallyridearchive file",
+        terms=[{"id": "sally_ride", "text": "Sally Ride"}],
+    )
+    assert len(result["matches"]) == 1
+    assert result["matches"][0]["matched_text"] == "sallyride"
+
+
+def test_pronunciation_scan_prefilters_windows_without_predicting(fake_model: FakeG2PModel):
+    text = "the quick brown fox jumped over the lazy dog near the river bank"
+    result = pronunciation.pronunciation_scan(
+        text=text,
+        terms=[{"id": "john_smythe", "text": "John Smythe"}],
+    )
+    assert result["matches"] == []
+    # Unique tokens (11) + the term itself (1). Before the alignment-based
+    # prefilter this also ran one G2P call per candidate character window.
+    assert fake_model.predict_calls <= 12
 
 
 def test_pronunciation_scan_skips_overlong_character_windows_before_g2p_truncation(
