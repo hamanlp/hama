@@ -1,0 +1,1253 @@
+[
+  {
+    "name": "ascii_basic",
+    "input": "hello world",
+    "kwargs": {},
+    "ipa": "hɛloʊ wɝld",
+    "display_ipa": "hɛloʊ wɝld",
+    "alignments": [
+      {
+        "phoneme": "h",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "ɛ",
+        "phoneme_index": 1,
+        "char_index": 1
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 2,
+        "char_index": 2
+      },
+      {
+        "phoneme": "oʊ",
+        "phoneme_index": 3,
+        "char_index": 4
+      },
+      {
+        "phoneme": "w",
+        "phoneme_index": 4,
+        "char_index": 6
+      },
+      {
+        "phoneme": "ɝ",
+        "phoneme_index": 5,
+        "char_index": 8
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 6,
+        "char_index": 9
+      },
+      {
+        "phoneme": "d",
+        "phoneme_index": 7,
+        "char_index": 10
+      }
+    ]
+  },
+  {
+    "name": "ascii_sentence",
+    "input": "Really? What's the orbital velocity of the moon?",
+    "kwargs": {
+      "preserve_literals": "punct"
+    },
+    "ipa": "ɹili hwæts ði o ɾ β̞ i t̪ a l vəlɑsɪti ɔf ði mun",
+    "display_ipa": "ɹili? hwæt's ði o ɾ β̞ i t̪ a l vəlɑsɪti ɔf ði mun?",
+    "alignments": [
+      {
+        "phoneme": "ɹ",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 1,
+        "char_index": 1
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 2,
+        "char_index": 3
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 3,
+        "char_index": 5
+      },
+      {
+        "phoneme": "h",
+        "phoneme_index": 4,
+        "char_index": 9
+      },
+      {
+        "phoneme": "w",
+        "phoneme_index": 5,
+        "char_index": 8
+      },
+      {
+        "phoneme": "æ",
+        "phoneme_index": 6,
+        "char_index": 10
+      },
+      {
+        "phoneme": "t",
+        "phoneme_index": 7,
+        "char_index": 11
+      },
+      {
+        "phoneme": "s",
+        "phoneme_index": 8,
+        "char_index": 13
+      },
+      {
+        "phoneme": "ð",
+        "phoneme_index": 9,
+        "char_index": 15
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 10,
+        "char_index": 17
+      },
+      {
+        "phoneme": "o",
+        "phoneme_index": 11,
+        "char_index": 19
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 12,
+        "char_index": 19
+      },
+      {
+        "phoneme": "ɾ",
+        "phoneme_index": 13,
+        "char_index": 20
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 14,
+        "char_index": 20
+      },
+      {
+        "phoneme": "β",
+        "phoneme_index": 15,
+        "char_index": 21
+      },
+      {
+        "phoneme": "̞",
+        "phoneme_index": 16,
+        "char_index": 21
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 17,
+        "char_index": 21
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 18,
+        "char_index": 22
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 19,
+        "char_index": 22
+      },
+      {
+        "phoneme": "t",
+        "phoneme_index": 20,
+        "char_index": 23
+      },
+      {
+        "phoneme": "̪",
+        "phoneme_index": 21,
+        "char_index": 23
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 22,
+        "char_index": 23
+      },
+      {
+        "phoneme": "a",
+        "phoneme_index": 23,
+        "char_index": 24
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 24,
+        "char_index": 24
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 25,
+        "char_index": 25
+      },
+      {
+        "phoneme": "v",
+        "phoneme_index": 26,
+        "char_index": 27
+      },
+      {
+        "phoneme": "ə",
+        "phoneme_index": 27,
+        "char_index": 28
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 28,
+        "char_index": 29
+      },
+      {
+        "phoneme": "ɑ",
+        "phoneme_index": 29,
+        "char_index": 30
+      },
+      {
+        "phoneme": "s",
+        "phoneme_index": 30,
+        "char_index": 31
+      },
+      {
+        "phoneme": "ɪ",
+        "phoneme_index": 31,
+        "char_index": 32
+      },
+      {
+        "phoneme": "t",
+        "phoneme_index": 32,
+        "char_index": 33
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 33,
+        "char_index": 34
+      },
+      {
+        "phoneme": "ɔ",
+        "phoneme_index": 34,
+        "char_index": 36
+      },
+      {
+        "phoneme": "f",
+        "phoneme_index": 35,
+        "char_index": 37
+      },
+      {
+        "phoneme": "ð",
+        "phoneme_index": 36,
+        "char_index": 39
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 37,
+        "char_index": 41
+      },
+      {
+        "phoneme": "m",
+        "phoneme_index": 38,
+        "char_index": 43
+      },
+      {
+        "phoneme": "u",
+        "phoneme_index": 39,
+        "char_index": 44
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 40,
+        "char_index": 46
+      }
+    ]
+  },
+  {
+    "name": "hangul",
+    "input": "안녕하세요",
+    "kwargs": {},
+    "ipa": "annjʌŋhasejo",
+    "display_ipa": "annjʌŋhasejo",
+    "alignments": [
+      {
+        "phoneme": "a",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 1,
+        "char_index": 0
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 2,
+        "char_index": 1
+      },
+      {
+        "phoneme": "jʌ",
+        "phoneme_index": 3,
+        "char_index": 1
+      },
+      {
+        "phoneme": "ŋ",
+        "phoneme_index": 4,
+        "char_index": 1
+      },
+      {
+        "phoneme": "h",
+        "phoneme_index": 5,
+        "char_index": 2
+      },
+      {
+        "phoneme": "a",
+        "phoneme_index": 6,
+        "char_index": 2
+      },
+      {
+        "phoneme": "s",
+        "phoneme_index": 7,
+        "char_index": 3
+      },
+      {
+        "phoneme": "e",
+        "phoneme_index": 8,
+        "char_index": 3
+      },
+      {
+        "phoneme": "jo",
+        "phoneme_index": 9,
+        "char_index": 4
+      }
+    ]
+  },
+  {
+    "name": "hangul_short",
+    "input": "안녕",
+    "kwargs": {},
+    "ipa": "annjʌŋ",
+    "display_ipa": "annjʌŋ",
+    "alignments": [
+      {
+        "phoneme": "a",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 1,
+        "char_index": 0
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 2,
+        "char_index": 1
+      },
+      {
+        "phoneme": "jʌ",
+        "phoneme_index": 3,
+        "char_index": 1
+      },
+      {
+        "phoneme": "ŋ",
+        "phoneme_index": 4,
+        "char_index": 1
+      }
+    ]
+  },
+  {
+    "name": "mixed",
+    "input": "The 한글 word is abc123",
+    "kwargs": {},
+    "ipa": "ði hangɯl wɝd is æbsɪn",
+    "display_ipa": "ði hangɯl wɝd is æbsɪn",
+    "alignments": [
+      {
+        "phoneme": "ð",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 1,
+        "char_index": 2
+      },
+      {
+        "phoneme": "h",
+        "phoneme_index": 2,
+        "char_index": 4
+      },
+      {
+        "phoneme": "a",
+        "phoneme_index": 3,
+        "char_index": 4
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 4,
+        "char_index": 4
+      },
+      {
+        "phoneme": "g",
+        "phoneme_index": 5,
+        "char_index": 5
+      },
+      {
+        "phoneme": "ɯ",
+        "phoneme_index": 6,
+        "char_index": 5
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 7,
+        "char_index": 5
+      },
+      {
+        "phoneme": "w",
+        "phoneme_index": 8,
+        "char_index": 7
+      },
+      {
+        "phoneme": "ɝ",
+        "phoneme_index": 9,
+        "char_index": 9
+      },
+      {
+        "phoneme": "d",
+        "phoneme_index": 10,
+        "char_index": 10
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 11,
+        "char_index": 12
+      },
+      {
+        "phoneme": "s",
+        "phoneme_index": 12,
+        "char_index": 13
+      },
+      {
+        "phoneme": "æ",
+        "phoneme_index": 13,
+        "char_index": 15
+      },
+      {
+        "phoneme": "b",
+        "phoneme_index": 14,
+        "char_index": 16
+      },
+      {
+        "phoneme": "s",
+        "phoneme_index": 15,
+        "char_index": 17
+      },
+      {
+        "phoneme": "ɪ",
+        "phoneme_index": 16,
+        "char_index": 18
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 17,
+        "char_index": 19
+      }
+    ]
+  },
+  {
+    "name": "punct_display",
+    "input": "hello!",
+    "kwargs": {
+      "preserve_literals": "punct"
+    },
+    "ipa": "hɛloʊ",
+    "display_ipa": "hɛloʊ!",
+    "alignments": [
+      {
+        "phoneme": "h",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "ɛ",
+        "phoneme_index": 1,
+        "char_index": 1
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 2,
+        "char_index": 2
+      },
+      {
+        "phoneme": "oʊ",
+        "phoneme_index": 3,
+        "char_index": 4
+      }
+    ]
+  },
+  {
+    "name": "punct_none",
+    "input": "hello!",
+    "kwargs": {
+      "preserve_literals": "none"
+    },
+    "ipa": "hɛloʊ",
+    "display_ipa": "hɛloʊ",
+    "alignments": [
+      {
+        "phoneme": "h",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "ɛ",
+        "phoneme_index": 1,
+        "char_index": 1
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 2,
+        "char_index": 2
+      },
+      {
+        "phoneme": "oʊ",
+        "phoneme_index": 3,
+        "char_index": 4
+      }
+    ]
+  },
+  {
+    "name": "whitespace_only",
+    "input": "   \t",
+    "kwargs": {},
+    "ipa": "x u̯ ä n ⁵ ¹",
+    "display_ipa": "x u̯ ä n ⁵ ¹",
+    "alignments": [
+      {
+        "phoneme": "x",
+        "phoneme_index": 0,
+        "char_index": -1
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 1,
+        "char_index": -1
+      },
+      {
+        "phoneme": "u",
+        "phoneme_index": 2,
+        "char_index": -1
+      },
+      {
+        "phoneme": "̯",
+        "phoneme_index": 3,
+        "char_index": -1
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 4,
+        "char_index": -1
+      },
+      {
+        "phoneme": "ä",
+        "phoneme_index": 5,
+        "char_index": -1
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 6,
+        "char_index": -1
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 7,
+        "char_index": -1
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 8,
+        "char_index": -1
+      },
+      {
+        "phoneme": "⁵",
+        "phoneme_index": 9,
+        "char_index": -1
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 10,
+        "char_index": -1
+      },
+      {
+        "phoneme": "¹",
+        "phoneme_index": 11,
+        "char_index": -1
+      }
+    ]
+  },
+  {
+    "name": "leading_ws",
+    "input": "   hello world",
+    "kwargs": {},
+    "ipa": "hɛloʊ wɝld",
+    "display_ipa": "hɛloʊ wɝld",
+    "alignments": [
+      {
+        "phoneme": "h",
+        "phoneme_index": 0,
+        "char_index": 3
+      },
+      {
+        "phoneme": "ɛ",
+        "phoneme_index": 1,
+        "char_index": 4
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 2,
+        "char_index": 5
+      },
+      {
+        "phoneme": "oʊ",
+        "phoneme_index": 3,
+        "char_index": 7
+      },
+      {
+        "phoneme": "w",
+        "phoneme_index": 4,
+        "char_index": 9
+      },
+      {
+        "phoneme": "ɝ",
+        "phoneme_index": 5,
+        "char_index": 11
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 6,
+        "char_index": 12
+      },
+      {
+        "phoneme": "d",
+        "phoneme_index": 7,
+        "char_index": 13
+      }
+    ]
+  },
+  {
+    "name": "trailing_ws",
+    "input": "hello world   ",
+    "kwargs": {},
+    "ipa": "hɛloʊ wɝld",
+    "display_ipa": "hɛloʊ wɝld",
+    "alignments": [
+      {
+        "phoneme": "h",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "ɛ",
+        "phoneme_index": 1,
+        "char_index": 1
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 2,
+        "char_index": 2
+      },
+      {
+        "phoneme": "oʊ",
+        "phoneme_index": 3,
+        "char_index": 4
+      },
+      {
+        "phoneme": "w",
+        "phoneme_index": 4,
+        "char_index": 6
+      },
+      {
+        "phoneme": "ɝ",
+        "phoneme_index": 5,
+        "char_index": 8
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 6,
+        "char_index": 9
+      },
+      {
+        "phoneme": "d",
+        "phoneme_index": 7,
+        "char_index": 10
+      }
+    ]
+  },
+  {
+    "name": "single_char",
+    "input": "a",
+    "kwargs": {},
+    "ipa": "ə",
+    "display_ipa": "ə",
+    "alignments": [
+      {
+        "phoneme": "ə",
+        "phoneme_index": 0,
+        "char_index": 0
+      }
+    ]
+  },
+  {
+    "name": "uppercase",
+    "input": "HELLO",
+    "kwargs": {},
+    "ipa": "hɛloʊ",
+    "display_ipa": "hɛloʊ",
+    "alignments": [
+      {
+        "phoneme": "h",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "ɛ",
+        "phoneme_index": 1,
+        "char_index": 1
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 2,
+        "char_index": 2
+      },
+      {
+        "phoneme": "oʊ",
+        "phoneme_index": 3,
+        "char_index": 4
+      }
+    ]
+  },
+  {
+    "name": "non_bmp",
+    "input": "가😀나",
+    "kwargs": {},
+    "ipa": "ganna",
+    "display_ipa": "ganna",
+    "alignments": [
+      {
+        "phoneme": "g",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "a",
+        "phoneme_index": 1,
+        "char_index": 0
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 2,
+        "char_index": 1
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 3,
+        "char_index": 2
+      },
+      {
+        "phoneme": "a",
+        "phoneme_index": 4,
+        "char_index": 2
+      }
+    ]
+  },
+  {
+    "name": "comma_split",
+    "input": "hello,world",
+    "kwargs": {
+      "split_delimiter": ",",
+      "output_delimiter": " | "
+    },
+    "ipa": "hɛloʊ | wɝld",
+    "display_ipa": "hɛloʊ | wɝld",
+    "alignments": [
+      {
+        "phoneme": "h",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "ɛ",
+        "phoneme_index": 1,
+        "char_index": 1
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 2,
+        "char_index": 2
+      },
+      {
+        "phoneme": "oʊ",
+        "phoneme_index": 3,
+        "char_index": 4
+      },
+      {
+        "phoneme": "w",
+        "phoneme_index": 4,
+        "char_index": 6
+      },
+      {
+        "phoneme": "ɝ",
+        "phoneme_index": 5,
+        "char_index": 8
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 6,
+        "char_index": 9
+      },
+      {
+        "phoneme": "d",
+        "phoneme_index": 7,
+        "char_index": 10
+      }
+    ]
+  },
+  {
+    "name": "comma_split_punct",
+    "input": "hello,world",
+    "kwargs": {
+      "split_delimiter": ",",
+      "output_delimiter": " | ",
+      "preserve_literals": "punct"
+    },
+    "ipa": "hɛloʊ | wɝld",
+    "display_ipa": "hɛloʊ | wɝld",
+    "alignments": [
+      {
+        "phoneme": "h",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "ɛ",
+        "phoneme_index": 1,
+        "char_index": 1
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 2,
+        "char_index": 2
+      },
+      {
+        "phoneme": "oʊ",
+        "phoneme_index": 3,
+        "char_index": 4
+      },
+      {
+        "phoneme": "w",
+        "phoneme_index": 4,
+        "char_index": 6
+      },
+      {
+        "phoneme": "ɝ",
+        "phoneme_index": 5,
+        "char_index": 8
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 6,
+        "char_index": 9
+      },
+      {
+        "phoneme": "d",
+        "phoneme_index": 7,
+        "char_index": 10
+      }
+    ]
+  },
+  {
+    "name": "long",
+    "input": "the quick brown fox jumps over the lazy dog near the river bank",
+    "kwargs": {},
+    "ipa": "ði kwɪk bɹaʊn fɑks d͡ʒʌmps oʊvə ði leɪzi dɔg nɪɹ ði ɹɪvə bæŋk",
+    "display_ipa": "ði kwɪk bɹaʊn fɑks d͡ʒʌmps oʊvə ði leɪzi dɔg nɪɹ ði ɹɪvə bæŋk",
+    "alignments": [
+      {
+        "phoneme": "ð",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 1,
+        "char_index": 2
+      },
+      {
+        "phoneme": "k",
+        "phoneme_index": 2,
+        "char_index": 4
+      },
+      {
+        "phoneme": "w",
+        "phoneme_index": 3,
+        "char_index": 5
+      },
+      {
+        "phoneme": "ɪ",
+        "phoneme_index": 4,
+        "char_index": 6
+      },
+      {
+        "phoneme": "k",
+        "phoneme_index": 5,
+        "char_index": 7
+      },
+      {
+        "phoneme": "b",
+        "phoneme_index": 6,
+        "char_index": 10
+      },
+      {
+        "phoneme": "ɹ",
+        "phoneme_index": 7,
+        "char_index": 11
+      },
+      {
+        "phoneme": "aʊ",
+        "phoneme_index": 8,
+        "char_index": 12
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 9,
+        "char_index": 14
+      },
+      {
+        "phoneme": "f",
+        "phoneme_index": 10,
+        "char_index": 16
+      },
+      {
+        "phoneme": "ɑ",
+        "phoneme_index": 11,
+        "char_index": 17
+      },
+      {
+        "phoneme": "k",
+        "phoneme_index": 12,
+        "char_index": 18
+      },
+      {
+        "phoneme": "s",
+        "phoneme_index": 13,
+        "char_index": 18
+      },
+      {
+        "phoneme": "d͡ʒ",
+        "phoneme_index": 14,
+        "char_index": 20
+      },
+      {
+        "phoneme": "ʌ",
+        "phoneme_index": 15,
+        "char_index": 21
+      },
+      {
+        "phoneme": "m",
+        "phoneme_index": 16,
+        "char_index": 22
+      },
+      {
+        "phoneme": "p",
+        "phoneme_index": 17,
+        "char_index": 23
+      },
+      {
+        "phoneme": "s",
+        "phoneme_index": 18,
+        "char_index": 24
+      },
+      {
+        "phoneme": "oʊ",
+        "phoneme_index": 19,
+        "char_index": 26
+      },
+      {
+        "phoneme": "v",
+        "phoneme_index": 20,
+        "char_index": 27
+      },
+      {
+        "phoneme": "ə",
+        "phoneme_index": 21,
+        "char_index": 28
+      },
+      {
+        "phoneme": "ð",
+        "phoneme_index": 22,
+        "char_index": 31
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 23,
+        "char_index": 33
+      },
+      {
+        "phoneme": "l",
+        "phoneme_index": 24,
+        "char_index": 35
+      },
+      {
+        "phoneme": "eɪ",
+        "phoneme_index": 25,
+        "char_index": 36
+      },
+      {
+        "phoneme": "z",
+        "phoneme_index": 26,
+        "char_index": 37
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 27,
+        "char_index": 38
+      },
+      {
+        "phoneme": "d",
+        "phoneme_index": 28,
+        "char_index": 40
+      },
+      {
+        "phoneme": "ɔ",
+        "phoneme_index": 29,
+        "char_index": 41
+      },
+      {
+        "phoneme": "g",
+        "phoneme_index": 30,
+        "char_index": 42
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 31,
+        "char_index": 44
+      },
+      {
+        "phoneme": "ɪ",
+        "phoneme_index": 32,
+        "char_index": 45
+      },
+      {
+        "phoneme": "ɹ",
+        "phoneme_index": 33,
+        "char_index": 47
+      },
+      {
+        "phoneme": "ð",
+        "phoneme_index": 34,
+        "char_index": 49
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 35,
+        "char_index": 51
+      },
+      {
+        "phoneme": "ɹ",
+        "phoneme_index": 36,
+        "char_index": 53
+      },
+      {
+        "phoneme": "ɪ",
+        "phoneme_index": 37,
+        "char_index": 54
+      },
+      {
+        "phoneme": "v",
+        "phoneme_index": 38,
+        "char_index": 55
+      },
+      {
+        "phoneme": "ə",
+        "phoneme_index": 39,
+        "char_index": 56
+      },
+      {
+        "phoneme": "b",
+        "phoneme_index": 40,
+        "char_index": 59
+      },
+      {
+        "phoneme": "æ",
+        "phoneme_index": 41,
+        "char_index": 60
+      },
+      {
+        "phoneme": "ŋ",
+        "phoneme_index": 42,
+        "char_index": 61
+      },
+      {
+        "phoneme": "k",
+        "phoneme_index": 43,
+        "char_index": 62
+      }
+    ]
+  },
+  {
+    "name": "cafe",
+    "input": "café naïve résumé",
+    "kwargs": {},
+    "ipa": "k a f e n a i̯ β̞ e h ɛ z u m e",
+    "display_ipa": "k a f e n a i̯ β̞ e h ɛ z u m e",
+    "alignments": [
+      {
+        "phoneme": "k",
+        "phoneme_index": 0,
+        "char_index": 0
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 1,
+        "char_index": 1
+      },
+      {
+        "phoneme": "a",
+        "phoneme_index": 2,
+        "char_index": 1
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 3,
+        "char_index": 1
+      },
+      {
+        "phoneme": "f",
+        "phoneme_index": 4,
+        "char_index": 2
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 5,
+        "char_index": 2
+      },
+      {
+        "phoneme": "e",
+        "phoneme_index": 6,
+        "char_index": 3
+      },
+      {
+        "phoneme": "n",
+        "phoneme_index": 7,
+        "char_index": 5
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 8,
+        "char_index": 6
+      },
+      {
+        "phoneme": "a",
+        "phoneme_index": 9,
+        "char_index": 6
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 10,
+        "char_index": 6
+      },
+      {
+        "phoneme": "i",
+        "phoneme_index": 11,
+        "char_index": 7
+      },
+      {
+        "phoneme": "̯",
+        "phoneme_index": 12,
+        "char_index": 7
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 13,
+        "char_index": 7
+      },
+      {
+        "phoneme": "β",
+        "phoneme_index": 14,
+        "char_index": 7
+      },
+      {
+        "phoneme": "̞",
+        "phoneme_index": 15,
+        "char_index": 8
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 16,
+        "char_index": 8
+      },
+      {
+        "phoneme": "e",
+        "phoneme_index": 17,
+        "char_index": 9
+      },
+      {
+        "phoneme": "h",
+        "phoneme_index": 18,
+        "char_index": 11
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 19,
+        "char_index": 11
+      },
+      {
+        "phoneme": "ɛ",
+        "phoneme_index": 20,
+        "char_index": 12
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 21,
+        "char_index": 12
+      },
+      {
+        "phoneme": "z",
+        "phoneme_index": 22,
+        "char_index": 13
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 23,
+        "char_index": 13
+      },
+      {
+        "phoneme": "u",
+        "phoneme_index": 24,
+        "char_index": 14
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 25,
+        "char_index": 14
+      },
+      {
+        "phoneme": "m",
+        "phoneme_index": 26,
+        "char_index": 15
+      },
+      {
+        "phoneme": " ",
+        "phoneme_index": 27,
+        "char_index": 15
+      },
+      {
+        "phoneme": "e",
+        "phoneme_index": 28,
+        "char_index": 16
+      }
+    ]
+  }
+]

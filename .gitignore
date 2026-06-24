@@ -6,7 +6,16 @@ python/.mypy_cache/
 *.egg-info/
 python/src/*.egg-info/
 PKG-INFO
+python/build/
+python/dist/
 ts/node_modules/
 ts/dist/
 ts/bun.lockb
 .DS_Store
+
+# Zig build artifacts
+zig/zig-out/
+zig/.zig-cache/
+
+# Regenerable per-node ORT oracle dumps (committed oracle is tests/fixtures/)
+tools/oracle_out/

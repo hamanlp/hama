@@ -1,11 +1,11 @@
 [project]
 name = "hama"
-version = "1.3.13"
-description = "Cross-platform grapheme-to-phoneme and phoneme-ASR inference library powered by ONNX."
+version = "1.4.0"
+description = "Cross-platform grapheme-to-phoneme and phoneme-ASR inference, powered by a self-contained Zig engine (no onnxruntime)."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "Apache-2.0"}
-keywords = ["g2p", "asr", "phoneme", "onnx", "onnxruntime", "korean"]
+keywords = ["g2p", "asr", "phoneme", "zig", "korean", "ipa"]
 authors = [
   {name = "Seongmin Park"}
 ]
@@ -23,7 +23,6 @@ classifiers = [
 ]
 dependencies = [
   "numpy>=1.24",
-  "onnxruntime>=1.20",
 ]
 
 [project.urls]
@@ -39,12 +38,28 @@ live = [
   "sounddevice>=0.4",
   "silero-vad>=6.2,<7",
 ]
+# Build/dev tooling for regenerating .hama packages and the ORT golden/oracle
+# fixtures (tools/convert_onnx.py, tools/dump_oracle.py, tools/capture_golden.py).
+dev = [
+  "onnx>=1.16",
+  "onnxruntime>=1.20",
+]
+
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [tool.uv]
 package = true
 
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.setuptools.package-data]
-"hama.assets" = ["*.onnx", "*.json"]
+# Ship the converted `.hama` weight packages, vocab, and the prebuilt native
+# engine libraries (one per platform under _libs/<platform>/).
+"hama.assets" = ["*.hama", "*.json"]
+"hama._libs" = ["*/libhama.*", "*/hama.dll"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

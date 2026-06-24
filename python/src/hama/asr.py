@@ -7,8 +7,8 @@ from typing import Iterable, List, Sequence
 import wave
 
 import numpy as np
-import onnxruntime as ort
 
+from . import _engine
 from .vocab import Vocabulary
 
 
@@ -50,12 +50,15 @@ def _resolve_name(available: Sequence[str], primary: str, *fallbacks: str) -> st
     raise KeyError(f"Could not resolve ONNX tensor name for '{primary}'. Available: {list(available)}")
 
 
-def _resolve_default_asr_model_path() -> Path:
-    assets = resources.files("hama.assets")
-    candidate = assets.joinpath("asr_waveform_fp16.onnx")
-    if candidate.is_file():
-        return Path(str(candidate))
-    raise FileNotFoundError(f"Missing waveform ASR asset: {candidate}")
+def _read_asr_hama_bytes(path_like) -> bytes:
+    """Resolve ASR `.hama` weight bytes from an explicit path (a `.hama`, or a
+    sibling of a `.onnx` path) or fall back to the packaged asset."""
+    if path_like is not None:
+        p = Path(str(path_like))
+        if p.suffix != ".hama":
+            p = p.with_suffix(".hama")
+        return p.read_bytes()
+    return resources.files("hama.assets").joinpath("asr_waveform.hama").read_bytes()
 
 
 def _to_float32_mono(waveform: np.ndarray) -> np.ndarray:
@@ -179,11 +182,7 @@ class ASRModel:
         providers: Sequence[str] | None = None,
         model_sample_rate: int = 16000,
     ):
-        if model_path is None:
-            model_path = _resolve_default_asr_model_path()
-        resolved_model_path = Path(str(model_path))
-        if not resolved_model_path.is_file():
-            raise FileNotFoundError(f"ASR model not found: {resolved_model_path}")
+        _ = providers  # retained for API compatibility; the Zig engine is CPU-only
 
         self.model_sample_rate = int(model_sample_rate)
         self.vocab = Vocabulary.load(vocab_path)
@@ -196,8 +195,7 @@ class ASRModel:
             else None
         )
 
-        provider_list = list(providers) if providers else None
-        self.session = ort.InferenceSession(str(resolved_model_path), providers=provider_list)
+        self.session = _engine.AsrSession(_read_asr_hama_bytes(model_path))
         input_names = [node.name for node in self.session.get_inputs()]
         output_names = [node.name for node in self.session.get_outputs()]
         has_waveform = "waveform" in input_names or any(name.startswith("waveform.") for name in input_names)

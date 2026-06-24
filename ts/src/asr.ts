@@ -1,9 +1,8 @@
 import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { InferenceSession, Tensor } from "onnxruntime-node";
 
 import vocabData from "./assets/g2p_vocab.json";
+import { ASR_VOCAB, HamaEngine } from "./engine.js";
+import { loadWasm, resolveModelBytes } from "./engine.node.js";
 
 interface VocabularyLike {
   decoder: string[];
@@ -37,37 +36,10 @@ export interface CTCDecodeOptions {
   collapseRepeats?: boolean;
 }
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const defaultWaveformModelPath = path.join(__dirname, "assets", "asr_waveform_fp16.onnx");
-
-const resolveDefaultAsrModelPath = (): string => {
-  if (fs.existsSync(defaultWaveformModelPath)) {
-    return defaultWaveformModelPath;
-  }
-  throw new Error(`Missing waveform ASR asset: ${defaultWaveformModelPath}`);
-};
-
-const resolveName = (available: readonly string[], primary: string, ...fallbacks: string[]): string => {
-  if (available.includes(primary)) return primary;
-  for (const fallback of fallbacks) {
-    if (available.includes(fallback)) return fallback;
-  }
-  const matches = available.filter(
-    (name) => name.startsWith(`${primary}.`) || name.startsWith(primary),
-  );
-  if (matches.length === 1) return matches[0];
-  if (matches.length > 1) {
-    const numeric = matches.filter((name) => name.startsWith(`${primary}.`));
-    if (numeric.length === 1) return numeric[0];
-    return matches[0];
-  }
-  throw new Error(`Could not resolve ONNX tensor name for '${primary}'. Available: ${available.join(", ")}`);
-};
-
-const scalarInt = (tensor: Tensor): number => {
-  const data = tensor.data as ArrayLike<number | bigint>;
-  const raw = data[0];
-  return typeof raw === "bigint" ? Number(raw) : Math.trunc(Number(raw));
+let asrEnginePromise: Promise<HamaEngine> | null = null;
+const getAsrEngine = (): Promise<HamaEngine> => {
+  if (asrEnginePromise == null) asrEnginePromise = loadWasm().then((w) => HamaEngine.fromBytes(w));
+  return asrEnginePromise;
 };
 
 export const decodeCtcTokens = (
@@ -126,7 +98,8 @@ const loadDecoderTokens = (vocabPath?: string): string[] => {
 };
 
 export class ASRNodeModel {
-  private readonly session: InferenceSession;
+  private readonly engine: HamaEngine;
+  private readonly handle: number;
   private readonly decoderTokens: string[];
   private readonly blankId: number;
   private readonly unkId: number | null;
@@ -136,13 +109,10 @@ export class ASRNodeModel {
   private readonly unkBias: number;
   private readonly collapseRepeats: boolean;
   private readonly sampleRate: number;
-  private readonly waveformInputName: string;
-  private readonly waveformLengthsInputName: string;
-  private readonly logProbsOutputName: string;
-  private readonly outLengthsOutputName: string;
 
-  private constructor(session: InferenceSession, options: Required<ASRNodeOptions>) {
-    this.session = session;
+  private constructor(engine: HamaEngine, handle: number, options: Required<ASRNodeOptions>) {
+    this.engine = engine;
+    this.handle = handle;
     this.sampleRate = options.sampleRate;
     this.wordBoundaryToken = options.wordBoundaryToken;
     this.temperature = options.temperature;
@@ -156,26 +126,11 @@ export class ASRNodeModel {
     }
     const unk = this.decoderTokens.indexOf(options.unkToken);
     this.unkId = unk >= 0 ? unk : null;
-
-    const inputNames = this.session.inputNames;
-    const hasWaveform =
-      inputNames.includes("waveform")
-      || inputNames.some((name) => name.startsWith("waveform."));
-    if (!hasWaveform) {
-      throw new Error(
-        `Unsupported ASR ONNX inputs: ${inputNames.join(", ")}. `
-        + "hama ASR requires a waveform-input model with waveform/waveform_lengths.",
-      );
-    }
-    this.waveformInputName = resolveName(inputNames, "waveform");
-    this.waveformLengthsInputName = resolveName(inputNames, "waveform_lengths", "waveform_length");
-    this.logProbsOutputName = resolveName(this.session.outputNames, "log_probs");
-    this.outLengthsOutputName = resolveName(this.session.outputNames, "out_lengths");
   }
 
   static async create(options: ASRNodeOptions = {}): Promise<ASRNodeModel> {
     const opts: Required<ASRNodeOptions> = {
-      modelPath: options.modelPath ?? resolveDefaultAsrModelPath(),
+      modelPath: options.modelPath ?? "",
       vocabPath: options.vocabPath ?? "",
       sampleRate: options.sampleRate ?? 16000,
       blankToken: options.blankToken ?? "<blank>",
@@ -186,10 +141,9 @@ export class ASRNodeModel {
       unkBias: options.unkBias ?? 0.0,
       collapseRepeats: options.collapseRepeats ?? true,
     };
-    const session = await InferenceSession.create(opts.modelPath, {
-      graphOptimizationLevel: "disabled",
-    });
-    return new ASRNodeModel(session, opts);
+    const engine = await getAsrEngine();
+    const handle = engine.loadAsr(resolveModelBytes(options.modelPath || undefined, "asr_waveform.hama"));
+    return new ASRNodeModel(engine, handle, opts);
   }
 
   get inputFormat(): "waveform" {
@@ -210,16 +164,8 @@ export class ASRNodeModel {
       sampleRate === this.sampleRate
         ? mono
         : resampleLinear(mono, sampleRate, this.sampleRate);
-    const waveformTensor = new Tensor("float32", resampled, [1, resampled.length]);
-    const lengthTensor = new Tensor("int64", BigInt64Array.from([BigInt(resampled.length)]), [1]);
-    const outputs = await this.session.run({
-      [this.waveformInputName]: waveformTensor,
-      [this.waveformLengthsInputName]: lengthTensor,
-    });
-
-    const logProbs = outputs[this.logProbsOutputName] as Tensor;
-    const outLengths = outputs[this.outLengthsOutputName] as Tensor;
-    const numFrames = Math.max(0, Math.min(scalarInt(outLengths), Number(logProbs.dims[1] ?? 0)));
+    const { logProbs, T, outLength } = this.engine.asrRun(this.handle, resampled);
+    const numFrames = Math.max(0, Math.min(outLength, T));
     const frameTokenIds = this.argmaxFrames(logProbs, numFrames);
     const decoded = decodeCtcTokens(frameTokenIds, this.decoderTokens, {
       blankId: this.blankId,
@@ -236,21 +182,15 @@ export class ASRNodeModel {
     };
   }
 
-  private argmaxFrames(logProbs: Tensor, numFrames: number): number[] {
-    const dims = logProbs.dims.map(Number);
-    if (dims.length !== 3 || dims[0] !== 1) {
-      throw new Error(`Expected log_probs shape [1, T, C], got [${dims.join(", ")}]`);
-    }
-    const classes = dims[2];
-    const data = logProbs.data as Float32Array | number[];
-
+  private argmaxFrames(logProbs: Float32Array, numFrames: number): number[] {
+    const classes = ASR_VOCAB;
     const out: number[] = [];
     for (let t = 0; t < numFrames; t++) {
       let bestIdx = 0;
       let bestScore = -Infinity;
       const base = t * classes;
       for (let c = 0; c < classes; c++) {
-        const raw = Number(data[base + c]);
+        const raw = logProbs[base + c];
         const score =
           (this.temperature > 0 && Math.abs(this.temperature - 1.0) > 1e-8 ? raw / this.temperature : raw)
           + (c === this.blankId ? this.blankBias : 0.0)
