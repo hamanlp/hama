@@ -8,10 +8,21 @@ from typing import List, Literal, Pattern, Sequence
 import unicodedata
 
 import numpy as np
-import onnxruntime as ort
 
+from . import _engine
 from .tokenizer import TextTokenizer
 from .vocab import Vocabulary
+
+
+def _read_hama_bytes(path_like, asset_name: str) -> bytes:
+    """Resolve `.hama` weight bytes from an explicit path (a `.hama` file, or a
+    sibling of a given `.onnx` path) or fall back to the packaged asset."""
+    if path_like is not None:
+        p = Path(str(path_like))
+        if p.suffix != ".hama":
+            p = p.with_suffix(".hama")
+        return p.read_bytes()
+    return resources.files("hama.assets").joinpath(asset_name).read_bytes()
 
 
 @dataclass
@@ -67,10 +78,10 @@ class G2PModel:
         self.tokenizer = TextTokenizer(self.vocab, max_input_len=max_input_len)
         self.max_output_len = max_output_len
 
-        provider_list = list(providers) if providers else None
-        self.session: ort.InferenceSession | None = None
-        self.encoder_session: ort.InferenceSession | None = None
-        self.decoder_step_session: ort.InferenceSession | None = None
+        _ = providers  # retained for API compatibility; the Zig engine is CPU-only
+        self.session = None
+        self.encoder_session = None
+        self.decoder_step_session = None
         self._encoder_output_names: dict[str, str] | None = None
         self._decoder_step_input_names: dict[str, str] | None = None
         self._decoder_step_output_names: dict[str, str] | None = None
@@ -78,30 +89,15 @@ class G2PModel:
         if (encoder_model_path is None) != (decoder_step_model_path is None):
             raise ValueError("encoder_model_path and decoder_step_model_path must be provided together")
 
-        if encoder_model_path is not None and decoder_step_model_path is not None:
-            self.encoder_session = ort.InferenceSession(str(encoder_model_path), providers=provider_list)
-            self.decoder_step_session = ort.InferenceSession(str(decoder_step_model_path), providers=provider_list)
-            return
-
-        if model_path is not None and Path(model_path).is_dir():
-            enc_path = Path(model_path) / "encoder.onnx"
-            dec_path = Path(model_path) / "decoder_step.onnx"
-            if enc_path.is_file() and dec_path.is_file():
-                self.encoder_session = ort.InferenceSession(str(enc_path), providers=provider_list)
-                self.decoder_step_session = ort.InferenceSession(str(dec_path), providers=provider_list)
-                return
-
-        if model_path is None:
-            assets = resources.files("hama.assets")
-            enc_asset = assets.joinpath("encoder.onnx")
-            dec_asset = assets.joinpath("decoder_step.onnx")
-            if enc_asset.is_file() and dec_asset.is_file():
-                self.encoder_session = ort.InferenceSession(str(enc_asset), providers=provider_list)
-                self.decoder_step_session = ort.InferenceSession(str(dec_asset), providers=provider_list)
-                return
-            model_path = assets.joinpath("g2p_fp16.onnx")
-
-        self.session = ort.InferenceSession(str(model_path), providers=provider_list)
+        # Split encoder + decoder-step over the `.hama` weights, run by the Zig engine.
+        # A directory `model_path` resolves the split weights inside it.
+        enc_src = encoder_model_path if encoder_model_path is not None else model_path
+        dec_src = decoder_step_model_path if decoder_step_model_path is not None else model_path
+        if model_path is not None and Path(str(model_path)).is_dir():
+            enc_src = Path(str(model_path)) / "encoder.hama"
+            dec_src = Path(str(model_path)) / "decoder_step.hama"
+        self.encoder_session = _engine.EncoderSession(_read_hama_bytes(enc_src, "encoder.hama"))
+        self.decoder_step_session = _engine.DecoderSession(_read_hama_bytes(dec_src, "decoder_step.hama"))
 
     def __call__(
         self,

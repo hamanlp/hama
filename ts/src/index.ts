@@ -1,7 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { InferenceSession, Tensor } from "onnxruntime-node";
+import { HamaEngine } from "./engine.js";
+import { loadWasm, resolveModelBytes } from "./engine.node.js";
 
 import {
   buildDisplayIpa,
@@ -38,44 +36,25 @@ export interface PredictOptions {
   preserveLiterals?: PreserveLiteralsMode;
 }
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const defaultModelPath = path.join(__dirname, "assets", "g2p_fp16.onnx");
-const defaultEncoderModelPath = path.join(__dirname, "assets", "encoder.onnx");
-const defaultDecoderStepModelPath = path.join(__dirname, "assets", "decoder_step.onnx");
 let defaultPronunciationModelPromise: Promise<G2PNodeModel> | null = null;
+let enginePromise: Promise<HamaEngine> | null = null;
 
-type NodeSessions =
-  | { session: InferenceSession; encoderSession?: undefined; decoderStepSession?: undefined }
-  | { session?: undefined; encoderSession: InferenceSession; decoderStepSession: InferenceSession };
-
-const resolveName = (available: readonly string[], primary: string, ...fallbacks: string[]): string => {
-  if (available.includes(primary)) return primary;
-  for (const fallback of fallbacks) {
-    if (available.includes(fallback)) return fallback;
-  }
-  const matches = available.filter(
-    (name) => name.startsWith(`${primary}.`) || name.startsWith(primary),
-  );
-  if (matches.length === 1) return matches[0];
-  if (matches.length > 1) {
-    const numeric = matches.filter((name) => name.startsWith(`${primary}.`));
-    if (numeric.length === 1) return numeric[0];
-    return matches[0];
-  }
-  throw new Error(`Could not resolve ONNX tensor name for '${primary}'. Available: ${available.join(", ")}`);
+const getEngine = (): Promise<HamaEngine> => {
+  if (enginePromise == null) enginePromise = loadWasm().then((w) => HamaEngine.fromBytes(w));
+  return enginePromise;
 };
 
 export class G2PNodeModel {
-  private session?: InferenceSession;
-  private encoderSession?: InferenceSession;
-  private decoderStepSession?: InferenceSession;
+  private engine: HamaEngine;
+  private encHandle: number;
+  private decHandle: number;
   private maxInputLen: number;
   private maxOutputLen: number;
 
-  private constructor(sessions: NodeSessions, opts: Required<G2POptions>) {
-    this.session = sessions.session;
-    this.encoderSession = sessions.encoderSession;
-    this.decoderStepSession = sessions.decoderStepSession;
+  private constructor(engine: HamaEngine, encHandle: number, decHandle: number, opts: Required<G2POptions>) {
+    this.engine = engine;
+    this.encHandle = encHandle;
+    this.decHandle = decHandle;
     this.maxInputLen = opts.maxInputLen;
     this.maxOutputLen = opts.maxOutputLen;
   }
@@ -84,45 +63,19 @@ export class G2PNodeModel {
     if ((options.encoderModelPath === undefined) !== (options.decoderStepModelPath === undefined)) {
       throw new Error("encoderModelPath and decoderStepModelPath must be provided together");
     }
-
-    let resolvedModelPath = options.modelPath ?? defaultModelPath;
-    let resolvedEncoderPath = options.encoderModelPath ?? defaultEncoderModelPath;
-    let resolvedDecoderStepPath = options.decoderStepModelPath ?? defaultDecoderStepModelPath;
-
-    if (
-      options.modelPath &&
-      fs.existsSync(options.modelPath) &&
-      fs.statSync(options.modelPath).isDirectory()
-    ) {
-      resolvedEncoderPath = path.join(options.modelPath, "encoder.onnx");
-      resolvedDecoderStepPath = path.join(options.modelPath, "decoder_step.onnx");
-      resolvedModelPath = path.join(options.modelPath, "g2p_fp16.onnx");
-    }
-
     const opts: Required<G2POptions> = {
-      modelPath: resolvedModelPath,
-      encoderModelPath: resolvedEncoderPath,
-      decoderStepModelPath: resolvedDecoderStepPath,
+      modelPath: options.modelPath ?? "",
+      encoderModelPath: options.encoderModelPath ?? "",
+      decoderStepModelPath: options.decoderStepModelPath ?? "",
       maxInputLen: options.maxInputLen ?? 128,
-      // Retained for API compatibility; autoregressive ONNX sets output length in-graph.
       maxOutputLen: options.maxOutputLen ?? 32,
     };
-
-    const sessionOptions = { graphOptimizationLevel: "disabled" as const };
-    const shouldUseSplit =
-      (options.encoderModelPath !== undefined && options.decoderStepModelPath !== undefined) ||
-      (fs.existsSync(opts.encoderModelPath) && fs.existsSync(opts.decoderStepModelPath));
-
-    if (shouldUseSplit) {
-      const [encoderSession, decoderStepSession] = await Promise.all([
-        InferenceSession.create(opts.encoderModelPath, sessionOptions),
-        InferenceSession.create(opts.decoderStepModelPath, sessionOptions),
-      ]);
-      return new G2PNodeModel({ encoderSession, decoderStepSession }, opts);
-    }
-
-    const session = await InferenceSession.create(opts.modelPath, sessionOptions);
-    return new G2PNodeModel({ session }, opts);
+    const engine = await getEngine();
+    const encBytes = resolveModelBytes(options.encoderModelPath ?? options.modelPath, "encoder.hama");
+    const decBytes = resolveModelBytes(options.decoderStepModelPath ?? options.modelPath, "decoder_step.hama");
+    const encHandle = engine.loadEncoder(encBytes);
+    const decHandle = engine.loadDecoder(decBytes);
+    return new G2PNodeModel(engine, encHandle, decHandle, opts);
   }
 
   async predict(text: string, options: PredictOptions = {}): Promise<G2PResult> {
@@ -196,137 +149,39 @@ export class G2PNodeModel {
         alignments: [],
       };
     }
-
-    if (this.encoderSession && this.decoderStepSession) {
-      return this.predictSingleSplit(prepared.modelText, text, prepared.charIndexMap, baseCharIndex, preserveLiterals);
-    }
-    if (!this.session) {
-      throw new Error("No ONNX session initialized");
-    }
-    const encoded = encodeText(prepared.modelText, this.maxInputLen);
-    const inputIds = new BigInt64Array(encoded.ids);
-    const inputLengths = new BigInt64Array([BigInt(encoded.length || 1)]);
-
-    const feeds: Record<string, Tensor> = {
-      input_ids: new Tensor("int64", inputIds, [1, this.maxInputLen]),
-      input_lengths: new Tensor("int64", inputLengths, [1]),
-    };
-
-    const outputs = await this.session.run(feeds);
-    const decoded = outputs.decoded_ids.data as BigInt64Array;
-    const attn = outputs.attn_indices.data as BigInt64Array;
-    const rawResult = decodeIdsToResult(decoded, attn, encoded.positionMap);
-    const relativeAlignments = rawResult.alignments.map((alignment, idx) => ({
-      phoneme: alignment.phoneme,
-      phonemeIndex: idx,
-      charIndex:
-        alignment.charIndex >= 0 && alignment.charIndex < prepared.charIndexMap.length
-          ? prepared.charIndexMap[alignment.charIndex]
-          : -1,
-    }));
-    return {
-      ipa: rawResult.ipa,
-      displayIpa:
-        preserveLiterals === "punct"
-          ? buildDisplayIpa(rawResult.ipa, relativeAlignments, text)
-          : rawResult.ipa,
-      alignments: relativeAlignments.map((alignment, idx) => ({
-        phoneme: alignment.phoneme,
-        phonemeIndex: idx,
-        charIndex:
-          alignment.charIndex < 0 ? alignment.charIndex : alignment.charIndex + baseCharIndex,
-      })),
-    };
+    return this.predictSingleSplit(prepared.modelText, text, prepared.charIndexMap, baseCharIndex, preserveLiterals);
   }
 
-  private async predictSingleSplit(
+  private predictSingleSplit(
     text: string,
     originalText: string,
     charIndexMap: number[],
     baseCharIndex: number,
     preserveLiterals: PreserveLiteralsMode,
-  ): Promise<G2PResult> {
-    if (!this.encoderSession || !this.decoderStepSession) {
-      throw new Error("Split ONNX sessions are not initialized");
-    }
-
+  ): G2PResult {
     const encoded = encodeText(text, this.maxInputLen);
     const inputIds = new BigInt64Array(encoded.ids);
-    const inputLengths = new BigInt64Array([BigInt(encoded.length || 1)]);
-    const encoderFeeds: Record<string, Tensor> = {
-      input_ids: new Tensor("int64", inputIds, [1, this.maxInputLen]),
-      input_lengths: new Tensor("int64", inputLengths, [1]),
-    };
+    const enc = this.engine.encoderRun(this.encHandle, inputIds, encoded.length || 1);
 
-    const encoderOutputs = await this.encoderSession.run(encoderFeeds);
-    const encoderOutputNames = this.encoderSession.outputNames;
-    const decoderInputNames = this.decoderStepSession.inputNames;
-    const decoderOutputNames = this.decoderStepSession.outputNames;
-    const encNames = {
-      encoder_outputs: resolveName(encoderOutputNames, "encoder_outputs"),
-      projected_keys: resolveName(encoderOutputNames, "projected_keys"),
-      encoder_mask: resolveName(encoderOutputNames, "encoder_mask"),
-      hidden: resolveName(encoderOutputNames, "hidden"),
-      prev_attn: resolveName(encoderOutputNames, "prev_attn"),
-    };
-    const decIn = {
-      decoder_input_ids: resolveName(decoderInputNames, "decoder_input_ids"),
-      encoder_outputs: resolveName(decoderInputNames, "encoder_outputs"),
-      projected_keys: resolveName(decoderInputNames, "projected_keys"),
-      encoder_mask: resolveName(decoderInputNames, "encoder_mask"),
-      prev_attn: resolveName(decoderInputNames, "prev_attn", "prev_attn_in"),
-      hidden: resolveName(decoderInputNames, "hidden", "hidden_in"),
-      positions: resolveName(decoderInputNames, "positions"),
-    };
-    const decOut = {
-      next_token_ids: resolveName(decoderOutputNames, "next_token_ids"),
-      hidden: resolveName(decoderOutputNames, "hidden_out", "hidden"),
-      prev_attn: resolveName(decoderOutputNames, "prev_attn_out", "prev_attn"),
-      attn_argmax: resolveName(decoderOutputNames, "attn_argmax"),
-    };
-    const encoderStates = {
-      encoder_outputs: encoderOutputs[encNames.encoder_outputs] as Tensor,
-      projected_keys: encoderOutputs[encNames.projected_keys] as Tensor,
-      encoder_mask: encoderOutputs[encNames.encoder_mask] as Tensor,
-      hidden: encoderOutputs[encNames.hidden] as Tensor,
-      prev_attn: encoderOutputs[encNames.prev_attn] as Tensor,
-    };
+    const positions = new Float32Array(enc.T);
+    for (let i = 0; i < enc.T; i++) positions[i] = i;
 
-    const srcLen = Number(encoderStates.encoder_outputs.dims[1] ?? 0);
-    const positions = new Float32Array(srcLen);
-    for (let i = 0; i < srcLen; i++) positions[i] = i;
-    const positionsTensor = new Tensor("float32", positions, [1, srcLen]);
-
-    let decoderInput = new Tensor("int64", new BigInt64Array([BigInt(decoderIds.sos)]), [1, 1]);
-    let hidden = encoderStates.hidden;
-    let prevAttn = encoderStates.prev_attn;
-
-    const decoded: bigint[] = [];
-    const attnIndices: bigint[] = [];
+    let hidden = enc.hidden;
+    let prevAttn = enc.prevAttn;
+    let token = decoderIds.sos;
+    const decoded: number[] = [];
+    const attnIndices: number[] = [];
 
     for (let step = 0; step < this.maxOutputLen; step++) {
-      const stepOutputs = await this.decoderStepSession.run({
-        [decIn.decoder_input_ids]: decoderInput,
-        [decIn.encoder_outputs]: encoderStates.encoder_outputs,
-        [decIn.projected_keys]: encoderStates.projected_keys,
-        [decIn.encoder_mask]: encoderStates.encoder_mask,
-        [decIn.prev_attn]: prevAttn,
-        [decIn.hidden]: hidden,
-        [decIn.positions]: positionsTensor,
-      });
-
-      const nextToken = firstInt64(stepOutputs[decOut.next_token_ids] as Tensor);
-      const attnIdx = firstInt64(stepOutputs[decOut.attn_argmax] as Tensor);
-      decoded.push(nextToken);
-      attnIndices.push(attnIdx);
-
-      hidden = stepOutputs[decOut.hidden] as Tensor;
-      prevAttn = stepOutputs[decOut.prev_attn] as Tensor;
-      decoderInput = new Tensor("int64", new BigInt64Array([nextToken]), [1, 1]);
-
-      if (nextToken === BigInt(decoderIds.eos)) {
-        break;
-      }
+      const out = this.engine.decoderStep(
+        this.decHandle, token, enc.encoderOutputs, enc.projectedKeys, enc.mask, prevAttn, hidden, positions,
+      );
+      decoded.push(out.nextToken);
+      attnIndices.push(out.attnArgmax);
+      hidden = out.hiddenOut;
+      prevAttn = out.prevOut;
+      token = out.nextToken;
+      if (token === decoderIds.eos) break;
     }
 
     const rawResult = decodeIdsToResult(decoded, attnIndices, encoded.positionMap);
@@ -353,12 +208,6 @@ export class G2PNodeModel {
     };
   }
 }
-
-const firstInt64 = (tensor: Tensor): bigint => {
-  const data = tensor.data as ArrayLike<number | bigint>;
-  const value = data[0];
-  return typeof value === "bigint" ? value : BigInt(Math.trunc(Number(value)));
-};
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

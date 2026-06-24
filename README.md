@@ -2,22 +2,48 @@
 
 This repository packages hama inference runtimes. It ships:
 
-- a Python package built with `uv`, powered by ONNX Runtime
-- a Bun/TypeScript package that runs under Node.js/Bun and in browsers
+- a Python package built with `uv`, powered by a self-contained Zig engine (native FFI)
+- a Bun/TypeScript package that runs under Node.js/Bun and in browsers via WebAssembly
 - shared tokenizer + Hangul jamo helpers
-- a waveform-input phoneme ASR runtime over exported ONNX
+- a waveform-input phoneme ASR runtime
 - reproducible tests for both runtimes
+
+There is **no `onnxruntime` dependency**. The G2P encoder/decoder and the
+waveform ASR acoustic model are reimplemented from scratch in Zig (see `zig/`),
+compiled to a native shared library for Python (`ctypes`) and to one freestanding
+`hama.wasm` for TypeScript. The engine reproduces the previous ONNX Runtime
+outputs byte-for-byte on a committed golden corpus (`tests/fixtures/`).
 
 ## Assets
 
 Package assets (under `python/src/hama/assets` and `ts/src/assets`) contain:
 
-- `encoder.onnx` + `decoder_step.onnx` (split runtime, recommended)
-- `asr_waveform_fp16.onnx` (canonical ASR waveform model)
+- `encoder.hama` + `decoder_step.hama` (split G2P weight packages)
+- `asr_waveform.hama` (ASR waveform model weights)
 - `g2p_vocab.json`
+- `hama.wasm` (TypeScript only)
 
-Both runtimes use split assets by default. A legacy single-file ONNX is still
-supported only when you explicitly provide `model_path`/`modelPath`.
+`.hama` files are flat weight archives converted from the source `.onnx` models
+(kept under the top-level `assets/`) via `tools/convert_onnx.py`. The native
+engine libraries ship under `python/src/hama/_libs/<platform>/` (built by
+`tools/build_libs.sh`).
+
+## Building the engine from source
+
+Requires `zig>=0.16`.
+
+```bash
+cd zig && zig build test     # run kernel + model unit tests (validated vs ORT)
+zig build                    # native shared library (zig-out/lib)
+zig build wasm               # freestanding hama.wasm (zig-out/bin)
+# regenerate artifacts after a model change:
+uv --project python run python tools/convert_onnx.py   # .onnx -> .hama
+bash tools/build_libs.sh                                # native libs for all wheel platforms
+```
+
+To update the shipped models or cut a release, see [`MAINTAINING.md`](MAINTAINING.md)
+(architecture-vs-weights split, model-update flows, validation, and the publish
+runbook). Models are produced upstream by `hama-training`.
 
 ## Python package (`python/`)
 
@@ -98,13 +124,13 @@ The public API lives in `hama.__init__`:
   canonical `result.ipa`
 - `char_index` is `-1` only for whitespace-only input
 - `ASRModel.transcribe_file(path)` / `ASRModel.transcribe_waveform(waveform, sample_rate)`
-  return collapsed phoneme output from `asr_waveform_fp16.onnx`
+  return collapsed phoneme output from the ASR waveform model
 - `ASRResult` includes `phonemes`, `phoneme_text`, `word_phoneme_text`,
   `token_ids`, and frame-level `frame_token_ids`
 
 Pass `encoder_model_path` + `decoder_step_model_path` (recommended split mode),
 or `model_path` (single-file fallback), plus optional `vocab_path` for custom assets.
-For ASR, pass `model_path` if you want a non-default ONNX file.
+For ASR, pass `model_path` if you want non-default `.hama` weights.
 
 ## TypeScript + Bun (`ts/`)
 
@@ -203,10 +229,11 @@ API overview:
   - `G2PBrowserModel.create({ modelUrl?, encoderUrl?, decoderStepUrl?, ... })`
   - `ASRBrowserModel.create({ modelUrl?, vocabUrl?, sampleRate?, blankToken?, unkToken?, wordBoundaryToken?, blankBias?, unkBias?, collapseRepeats? })`
 
-The package copies `assets/*.onnx` + `g2p_vocab.json` into `dist` so Node/Bun
-resolves them via `import.meta.url`. For browser deployments, host the ONNX
-assets next to the bundle (default URLs resolve relative to the built module),
-and pass `vocabUrl` when you want a browser-specific decoder vocab JSON.
+The package copies `assets/*.hama` + `hama.wasm` + `g2p_vocab.json` into `dist`
+so Node/Bun resolves them via `import.meta.url`. For browser deployments, host
+the `.hama` + `hama.wasm` assets next to the bundle (default URLs resolve
+relative to the built module), and pass `vocabUrl` when you want a
+browser-specific decoder vocab JSON.
 
 ## Pronunciation Correction
 
@@ -260,7 +287,7 @@ Release notes live in [`CHANGELOG.md`](/Users/seongmin/hama/CHANGELOG.md).
 - Both runtimes use identical Hangul jamo logic so character indices map back to
   the original graphemes, even after jamo expansion.
 - ASR uses the same decoder vocabulary base (`g2p_vocab.json` decoder + `<wb>` + `<blank>`).
-- ASR expects a waveform-input ONNX named `asr_waveform_fp16.onnx`.
+- ASR uses the waveform model weights `asr_waveform.hama`.
 - TS file input currently supports WAV only (PCM 8/16/24/32-bit int, and 32-bit float WAV).
 - Inputs are case-normalized (lowercased in both Python and TS) and
   whitespace is ignored during tokenization.

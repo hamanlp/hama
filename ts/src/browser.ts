@@ -1,5 +1,6 @@
-import { InferenceSession, Tensor } from "onnxruntime-web";
 import vocabData from "./assets/g2p_vocab.json";
+import { ASR_VOCAB, HamaEngine } from "./engine.js";
+import { loadWasm, resolveModelBytes } from "./engine.browser.js";
 
 import {
   buildDisplayIpa,
@@ -68,33 +69,12 @@ export interface CTCDecodeOptions {
   collapseRepeats?: boolean;
 }
 
-const DEFAULT_MODEL_URL = new URL("./assets/g2p_fp16.onnx", import.meta.url).toString();
-const DEFAULT_ENCODER_URL = new URL("./assets/encoder.onnx", import.meta.url).toString();
-const DEFAULT_DECODER_STEP_URL = new URL("./assets/decoder_step.onnx", import.meta.url).toString();
-const DEFAULT_ASR_MODEL_URL = new URL("./assets/asr_waveform_fp16.onnx", import.meta.url).toString();
 let defaultPronunciationBrowserModelPromise: Promise<G2PBrowserModel> | null = null;
+let browserEnginePromise: Promise<HamaEngine> | null = null;
 
-const resolveName = (available: readonly string[], primary: string, ...fallbacks: string[]): string => {
-  if (available.includes(primary)) return primary;
-  for (const fallback of fallbacks) {
-    if (available.includes(fallback)) return fallback;
-  }
-  const matches = available.filter(
-    (name) => name.startsWith(`${primary}.`) || name.startsWith(primary),
-  );
-  if (matches.length === 1) return matches[0];
-  if (matches.length > 1) {
-    const numeric = matches.filter((name) => name.startsWith(`${primary}.`));
-    if (numeric.length === 1) return numeric[0];
-    return matches[0];
-  }
-  throw new Error(`Could not resolve ONNX tensor name for '${primary}'. Available: ${available.join(", ")}`);
-};
-
-const scalarInt = (tensor: Tensor): number => {
-  const data = tensor.data as ArrayLike<number | bigint>;
-  const raw = data[0];
-  return typeof raw === "bigint" ? Number(raw) : Math.trunc(Number(raw));
+const getBrowserEngine = (): Promise<HamaEngine> => {
+  if (browserEnginePromise == null) browserEnginePromise = loadWasm().then((w) => HamaEngine.fromBytes(w));
+  return browserEnginePromise;
 };
 
 export const decodeCtcTokens = (
@@ -156,12 +136,15 @@ const loadDecoderTokens = async (vocabUrl?: string): Promise<string[]> => {
 };
 
 export class G2PBrowserModel {
-  private session?: InferenceSession;
-  private encoderSession?: InferenceSession;
-  private decoderStepSession?: InferenceSession;
+  private readonly engine: HamaEngine;
+  private readonly encHandle: number;
+  private readonly decHandle: number;
   private readonly options: Required<BrowserOptions>;
 
-  private constructor(options: Required<BrowserOptions>) {
+  private constructor(engine: HamaEngine, encHandle: number, decHandle: number, options: Required<BrowserOptions>) {
+    this.engine = engine;
+    this.encHandle = encHandle;
+    this.decHandle = decHandle;
     this.options = options;
   }
 
@@ -170,38 +153,18 @@ export class G2PBrowserModel {
       throw new Error("encoderUrl and decoderStepUrl must be provided together");
     }
     const opts: Required<BrowserOptions> = {
-      modelUrl: options.modelUrl ?? DEFAULT_MODEL_URL,
-      encoderUrl: options.encoderUrl ?? DEFAULT_ENCODER_URL,
-      decoderStepUrl: options.decoderStepUrl ?? DEFAULT_DECODER_STEP_URL,
+      modelUrl: options.modelUrl ?? "",
+      encoderUrl: options.encoderUrl ?? "",
+      decoderStepUrl: options.decoderStepUrl ?? "",
       maxInputLen: options.maxInputLen ?? 128,
-      // Retained for API compatibility; autoregressive ONNX sets output length in-graph.
       maxOutputLen: options.maxOutputLen ?? 32,
     };
-    const model = new G2PBrowserModel(opts);
-    const useExplicitSplit = options.encoderUrl !== undefined && options.decoderStepUrl !== undefined;
-    if (useExplicitSplit) {
-      const [encoderSession, decoderStepSession] = await Promise.all([
-        InferenceSession.create(opts.encoderUrl, { executionProviders: ["wasm"] }),
-        InferenceSession.create(opts.decoderStepUrl, { executionProviders: ["wasm"] }),
-      ]);
-      model.encoderSession = encoderSession;
-      model.decoderStepSession = decoderStepSession;
-      return model;
-    }
-
-    try {
-      const [encoderSession, decoderStepSession] = await Promise.all([
-        InferenceSession.create(opts.encoderUrl, { executionProviders: ["wasm"] }),
-        InferenceSession.create(opts.decoderStepUrl, { executionProviders: ["wasm"] }),
-      ]);
-      model.encoderSession = encoderSession;
-      model.decoderStepSession = decoderStepSession;
-    } catch {
-      model.session = await InferenceSession.create(opts.modelUrl, {
-        executionProviders: ["wasm"],
-      });
-    }
-    return model;
+    const engine = await getBrowserEngine();
+    const [encBytes, decBytes] = await Promise.all([
+      resolveModelBytes(options.encoderUrl, "encoder.hama"),
+      resolveModelBytes(options.decoderStepUrl, "decoder_step.hama"),
+    ]);
+    return new G2PBrowserModel(engine, engine.loadEncoder(encBytes), engine.loadDecoder(decBytes), opts);
   }
 
   async predict(text: string, options: BrowserPredictOptions = {}): Promise<G2PResult> {
@@ -275,137 +238,39 @@ export class G2PBrowserModel {
         alignments: [],
       };
     }
-
-    if (this.encoderSession && this.decoderStepSession) {
-      return this.predictSingleSplit(prepared.modelText, text, prepared.charIndexMap, baseCharIndex, preserveLiterals);
-    }
-    if (!this.session) {
-      throw new Error("No ONNX session initialized");
-    }
-    const encoded = encodeText(prepared.modelText, this.options.maxInputLen);
-    const inputIds = BigInt64Array.from(encoded.ids);
-    const inputLengths = new BigInt64Array([BigInt(encoded.length || 1)]);
-
-    const feeds: Record<string, Tensor> = {
-      input_ids: new Tensor("int64", inputIds, [1, this.options.maxInputLen]),
-      input_lengths: new Tensor("int64", inputLengths, [1]),
-    };
-
-    const outputs = await this.session.run(feeds);
-    const decoded = outputs.decoded_ids.data as BigInt64Array;
-    const attn = outputs.attn_indices.data as BigInt64Array;
-    const rawResult = decodeIdsToResult(decoded, attn, encoded.positionMap);
-    const relativeAlignments = rawResult.alignments.map((alignment, idx) => ({
-      phoneme: alignment.phoneme,
-      phonemeIndex: idx,
-      charIndex:
-        alignment.charIndex >= 0 && alignment.charIndex < prepared.charIndexMap.length
-          ? prepared.charIndexMap[alignment.charIndex]
-          : -1,
-    }));
-    return {
-      ipa: rawResult.ipa,
-      displayIpa:
-        preserveLiterals === "punct"
-          ? buildDisplayIpa(rawResult.ipa, relativeAlignments, text)
-          : rawResult.ipa,
-      alignments: relativeAlignments.map((alignment, idx) => ({
-        phoneme: alignment.phoneme,
-        phonemeIndex: idx,
-        charIndex:
-          alignment.charIndex < 0 ? alignment.charIndex : alignment.charIndex + baseCharIndex,
-      })),
-    };
+    return this.predictSingleSplit(prepared.modelText, text, prepared.charIndexMap, baseCharIndex, preserveLiterals);
   }
 
-  private async predictSingleSplit(
+  private predictSingleSplit(
     text: string,
     originalText: string,
     charIndexMap: number[],
     baseCharIndex: number,
     preserveLiterals: PreserveLiteralsMode,
-  ): Promise<G2PResult> {
-    if (!this.encoderSession || !this.decoderStepSession) {
-      throw new Error("Split ONNX sessions are not initialized");
-    }
-
+  ): G2PResult {
     const encoded = encodeText(text, this.options.maxInputLen);
     const inputIds = BigInt64Array.from(encoded.ids);
-    const inputLengths = new BigInt64Array([BigInt(encoded.length || 1)]);
-    const encoderFeeds: Record<string, Tensor> = {
-      input_ids: new Tensor("int64", inputIds, [1, this.options.maxInputLen]),
-      input_lengths: new Tensor("int64", inputLengths, [1]),
-    };
+    const enc = this.engine.encoderRun(this.encHandle, inputIds, encoded.length || 1);
 
-    const encoderOutputs = await this.encoderSession.run(encoderFeeds);
-    const encoderOutputNames = this.encoderSession.outputNames;
-    const decoderInputNames = this.decoderStepSession.inputNames;
-    const decoderOutputNames = this.decoderStepSession.outputNames;
-    const encNames = {
-      encoder_outputs: resolveName(encoderOutputNames, "encoder_outputs"),
-      projected_keys: resolveName(encoderOutputNames, "projected_keys"),
-      encoder_mask: resolveName(encoderOutputNames, "encoder_mask"),
-      hidden: resolveName(encoderOutputNames, "hidden"),
-      prev_attn: resolveName(encoderOutputNames, "prev_attn"),
-    };
-    const decIn = {
-      decoder_input_ids: resolveName(decoderInputNames, "decoder_input_ids"),
-      encoder_outputs: resolveName(decoderInputNames, "encoder_outputs"),
-      projected_keys: resolveName(decoderInputNames, "projected_keys"),
-      encoder_mask: resolveName(decoderInputNames, "encoder_mask"),
-      prev_attn: resolveName(decoderInputNames, "prev_attn", "prev_attn_in"),
-      hidden: resolveName(decoderInputNames, "hidden", "hidden_in"),
-      positions: resolveName(decoderInputNames, "positions"),
-    };
-    const decOut = {
-      next_token_ids: resolveName(decoderOutputNames, "next_token_ids"),
-      hidden: resolveName(decoderOutputNames, "hidden_out", "hidden"),
-      prev_attn: resolveName(decoderOutputNames, "prev_attn_out", "prev_attn"),
-      attn_argmax: resolveName(decoderOutputNames, "attn_argmax"),
-    };
-    const encoderStates = {
-      encoder_outputs: encoderOutputs[encNames.encoder_outputs] as Tensor,
-      projected_keys: encoderOutputs[encNames.projected_keys] as Tensor,
-      encoder_mask: encoderOutputs[encNames.encoder_mask] as Tensor,
-      hidden: encoderOutputs[encNames.hidden] as Tensor,
-      prev_attn: encoderOutputs[encNames.prev_attn] as Tensor,
-    };
+    const positions = new Float32Array(enc.T);
+    for (let i = 0; i < enc.T; i++) positions[i] = i;
 
-    const srcLen = Number(encoderStates.encoder_outputs.dims[1] ?? 0);
-    const positions = new Float32Array(srcLen);
-    for (let i = 0; i < srcLen; i++) positions[i] = i;
-    const positionsTensor = new Tensor("float32", positions, [1, srcLen]);
-
-    let decoderInput = new Tensor("int64", new BigInt64Array([BigInt(decoderIds.sos)]), [1, 1]);
-    let hidden = encoderStates.hidden;
-    let prevAttn = encoderStates.prev_attn;
-
-    const decoded: bigint[] = [];
-    const attnIndices: bigint[] = [];
+    let hidden = enc.hidden;
+    let prevAttn = enc.prevAttn;
+    let token = decoderIds.sos;
+    const decoded: number[] = [];
+    const attnIndices: number[] = [];
 
     for (let step = 0; step < this.options.maxOutputLen; step++) {
-      const stepOutputs = await this.decoderStepSession.run({
-        [decIn.decoder_input_ids]: decoderInput,
-        [decIn.encoder_outputs]: encoderStates.encoder_outputs,
-        [decIn.projected_keys]: encoderStates.projected_keys,
-        [decIn.encoder_mask]: encoderStates.encoder_mask,
-        [decIn.prev_attn]: prevAttn,
-        [decIn.hidden]: hidden,
-        [decIn.positions]: positionsTensor,
-      });
-
-      const nextToken = firstInt64(stepOutputs[decOut.next_token_ids] as Tensor);
-      const attnIdx = firstInt64(stepOutputs[decOut.attn_argmax] as Tensor);
-      decoded.push(nextToken);
-      attnIndices.push(attnIdx);
-
-      hidden = stepOutputs[decOut.hidden] as Tensor;
-      prevAttn = stepOutputs[decOut.prev_attn] as Tensor;
-      decoderInput = new Tensor("int64", new BigInt64Array([nextToken]), [1, 1]);
-
-      if (nextToken === BigInt(decoderIds.eos)) {
-        break;
-      }
+      const out = this.engine.decoderStep(
+        this.decHandle, token, enc.encoderOutputs, enc.projectedKeys, enc.mask, prevAttn, hidden, positions,
+      );
+      decoded.push(out.nextToken);
+      attnIndices.push(out.attnArgmax);
+      hidden = out.hiddenOut;
+      prevAttn = out.prevOut;
+      token = out.nextToken;
+      if (token === decoderIds.eos) break;
     }
 
     const rawResult = decodeIdsToResult(decoded, attnIndices, encoded.positionMap);
@@ -434,7 +299,8 @@ export class G2PBrowserModel {
 }
 
 export class ASRBrowserModel {
-  private readonly session: InferenceSession;
+  private readonly engine: HamaEngine;
+  private readonly handle: number;
   private readonly decoderTokens: string[];
   private readonly blankId: number;
   private readonly unkId: number | null;
@@ -444,17 +310,15 @@ export class ASRBrowserModel {
   private readonly unkBias: number;
   private readonly collapseRepeats: boolean;
   private readonly sampleRate: number;
-  private readonly waveformInputName: string;
-  private readonly waveformLengthsInputName: string;
-  private readonly logProbsOutputName: string;
-  private readonly outLengthsOutputName: string;
 
   private constructor(
-    session: InferenceSession,
+    engine: HamaEngine,
+    handle: number,
     decoderTokens: string[],
     options: Required<Omit<ASRBrowserOptions, "modelUrl" | "vocabUrl">>,
   ) {
-    this.session = session;
+    this.engine = engine;
+    this.handle = handle;
     this.sampleRate = options.sampleRate;
     this.wordBoundaryToken = options.wordBoundaryToken;
     this.temperature = options.temperature;
@@ -468,30 +332,16 @@ export class ASRBrowserModel {
     }
     const unk = this.decoderTokens.indexOf(options.unkToken);
     this.unkId = unk >= 0 ? unk : null;
-
-    const inputNames = this.session.inputNames;
-    const hasWaveform =
-      inputNames.includes("waveform")
-      || inputNames.some((name) => name.startsWith("waveform."));
-    if (!hasWaveform) {
-      throw new Error(
-        `Unsupported ASR ONNX inputs: ${inputNames.join(", ")}. `
-        + "hama browser ASR requires a waveform-input model with waveform/waveform_lengths.",
-      );
-    }
-    this.waveformInputName = resolveName(inputNames, "waveform");
-    this.waveformLengthsInputName = resolveName(inputNames, "waveform_lengths", "waveform_length");
-    this.logProbsOutputName = resolveName(this.session.outputNames, "log_probs");
-    this.outLengthsOutputName = resolveName(this.session.outputNames, "out_lengths");
   }
 
   static async create(options: ASRBrowserOptions = {}): Promise<ASRBrowserModel> {
-    const decoderTokens = await loadDecoderTokens(options.vocabUrl);
-    const session = await InferenceSession.create(
-      options.modelUrl ?? DEFAULT_ASR_MODEL_URL,
-      { executionProviders: ["wasm"] },
-    );
-    return new ASRBrowserModel(session, decoderTokens, {
+    const engine = await getBrowserEngine();
+    const [decoderTokens, modelBytes] = await Promise.all([
+      loadDecoderTokens(options.vocabUrl),
+      resolveModelBytes(options.modelUrl, "asr_waveform.hama"),
+    ]);
+    const handle = engine.loadAsr(modelBytes);
+    return new ASRBrowserModel(engine, handle, decoderTokens, {
       sampleRate: options.sampleRate ?? 16000,
       blankToken: options.blankToken ?? "<blank>",
       unkToken: options.unkToken ?? "<unk>",
@@ -516,16 +366,8 @@ export class ASRBrowserModel {
       sampleRate === this.sampleRate
         ? mono
         : resampleLinear(mono, sampleRate, this.sampleRate);
-    const waveformTensor = new Tensor("float32", resampled, [1, resampled.length]);
-    const lengthTensor = new Tensor("int64", BigInt64Array.from([BigInt(resampled.length)]), [1]);
-    const outputs = await this.session.run({
-      [this.waveformInputName]: waveformTensor,
-      [this.waveformLengthsInputName]: lengthTensor,
-    });
-
-    const logProbs = outputs[this.logProbsOutputName] as Tensor;
-    const outLengths = outputs[this.outLengthsOutputName] as Tensor;
-    const numFrames = Math.max(0, Math.min(scalarInt(outLengths), Number(logProbs.dims[1] ?? 0)));
+    const { logProbs, T, outLength } = this.engine.asrRun(this.handle, resampled);
+    const numFrames = Math.max(0, Math.min(outLength, T));
     const frameTokenIds = this.argmaxFrames(logProbs, numFrames);
     const decoded = decodeCtcTokens(frameTokenIds, this.decoderTokens, {
       blankId: this.blankId,
@@ -542,21 +384,15 @@ export class ASRBrowserModel {
     };
   }
 
-  private argmaxFrames(logProbs: Tensor, numFrames: number): number[] {
-    const dims = logProbs.dims.map(Number);
-    if (dims.length !== 3 || dims[0] !== 1) {
-      throw new Error(`Expected log_probs shape [1, T, C], got [${dims.join(", ")}]`);
-    }
-    const classes = dims[2];
-    const data = logProbs.data as Float32Array | number[];
-
+  private argmaxFrames(logProbs: Float32Array, numFrames: number): number[] {
+    const classes = ASR_VOCAB;
     const out: number[] = [];
     for (let t = 0; t < numFrames; t++) {
       let bestIdx = 0;
       let bestScore = -Infinity;
       const base = t * classes;
       for (let c = 0; c < classes; c++) {
-        const raw = Number(data[base + c]);
+        const raw = logProbs[base + c];
         const score =
           (this.temperature > 0 && Math.abs(this.temperature - 1.0) > 1e-8 ? raw / this.temperature : raw)
           + (c === this.blankId ? this.blankBias : 0.0)
@@ -571,12 +407,6 @@ export class ASRBrowserModel {
     return out;
   }
 }
-
-const firstInt64 = (tensor: Tensor): bigint => {
-  const data = tensor.data as ArrayLike<number | bigint>;
-  const value = data[0];
-  return typeof value === "bigint" ? value : BigInt(Math.trunc(Number(value)));
-};
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

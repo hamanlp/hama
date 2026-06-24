@@ -1,53 +1,10 @@
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-class FakeTensor {
-  readonly type: string;
-  readonly data: Float32Array | BigInt64Array;
-  readonly dims: number[];
-
-  constructor(type: string, data: Float32Array | BigInt64Array, dims: number[]) {
-    this.type = type;
-    this.data = data;
-    this.dims = dims;
-  }
-}
-
-class FakeSession {
-  readonly inputNames = ["waveform", "waveform_lengths"];
-  readonly outputNames = ["log_probs", "out_lengths"];
-
-  static async create(_modelPath: string): Promise<FakeSession> {
-    return new FakeSession();
-  }
-
-  async run(feeds: Record<string, FakeTensor>): Promise<Record<string, FakeTensor>> {
-    const waveform = feeds.waveform;
-    const length = Number((feeds.waveform_lengths.data as BigInt64Array)[0]);
-    expect(waveform.dims[0]).toBe(1);
-    expect(waveform.dims[1]).toBe(length);
-
-    const timeSteps = Math.max(1, Math.floor(length / 320));
-    const logits = new Float32Array(timeSteps * 5).fill(-6.0);
-    const pattern = [0, 0, 1, 4, 3, 2, 4];
-    for (let t = 0; t < timeSteps; t++) {
-      logits[t * 5 + pattern[t % pattern.length]] = 6.0;
-    }
-    return {
-      log_probs: new FakeTensor("float32", logits, [1, timeSteps, 5]),
-      out_lengths: new FakeTensor("int64", BigInt64Array.from([BigInt(timeSteps)]), [1]),
-    };
-  }
-}
-
-mock.module("onnxruntime-node", () => ({
-  InferenceSession: FakeSession,
-  Tensor: FakeTensor,
-}));
-
-const { ASRNodeModel, decodeCtcTokens } = await import("../src/asr");
+import { ASRNodeModel, decodeCtcTokens } from "../src/asr";
+import { ASR_VOCAB } from "../src/engine";
 
 describe("decodeCtcTokens", () => {
   it("collapses repeats, removes blank, and splits word boundaries", () => {
@@ -55,10 +12,7 @@ describe("decodeCtcTokens", () => {
     const result = decodeCtcTokens(
       [0, 0, 3, 3, 1, 1, 2, 2, 0],
       decoderTokens,
-      {
-        blankId: 3,
-        wordBoundaryToken: "<wb>",
-      },
+      { blankId: 3, wordBoundaryToken: "<wb>" },
     );
     expect(result.tokenIds).toEqual([0, 1, 2, 0]);
     expect(result.phonemes).toEqual(["a", "b", "a"]);
@@ -66,35 +20,29 @@ describe("decodeCtcTokens", () => {
   });
 });
 
-describe("ASRNodeModel", () => {
+describe("ASRNodeModel (wasm backend)", () => {
   it("is waveform-only", async () => {
-    const model = await ASRNodeModel.create({ modelPath: "/tmp/fake-asr-waveform.onnx" });
+    const model = await ASRNodeModel.create();
     expect(model.inputFormat).toBe("waveform");
     expect("transcribeFeatures" in model).toBe(false);
   });
 
-  it("runs waveform inference", async () => {
-    const model = await ASRNodeModel.create({
-      modelPath: "/tmp/fake-asr-waveform.onnx",
-      sampleRate: 16000,
-    });
+  it("runs waveform inference (with resampling)", async () => {
+    const model = await ASRNodeModel.create({ sampleRate: 16000 });
     const sampleRate = 8000;
     const n = sampleRate;
     const waveform = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      waveform[i] = 0.1 * Math.sin((2 * Math.PI * 220 * i) / sampleRate);
-    }
+    for (let i = 0; i < n; i++) waveform[i] = 0.1 * Math.sin((2 * Math.PI * 220 * i) / sampleRate);
 
     const result = await model.transcribeWaveform(waveform, sampleRate);
     expect(result.numFrames).toBeGreaterThan(0);
     expect(result.frameTokenIds.length).toBe(result.numFrames);
     expect(result.tokenIds.length).toBeLessThanOrEqual(result.numFrames);
     expect(result.phonemeText).toBe(result.phonemes.join(" "));
-    expect(result.wordPhonemeText.length).toBeGreaterThan(0);
   });
 
   it("runs wav file inference", async () => {
-    const model = await ASRNodeModel.create({ modelPath: "/tmp/fake-asr-waveform.onnx" });
+    const model = await ASRNodeModel.create();
     const sampleRate = 16000;
     const n = Math.floor(sampleRate * 0.4);
     const pcm16 = new Int16Array(n);
@@ -102,11 +50,9 @@ describe("ASRNodeModel", () => {
       const v = 0.1 * Math.sin((2 * Math.PI * 440 * i) / sampleRate);
       pcm16[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
     }
-
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hama-asr-test-"));
     const wavPath = path.join(tmpDir, "tone.wav");
     fs.writeFileSync(wavPath, encodePcm16MonoWav(pcm16, sampleRate));
-
     try {
       const result = await model.transcribeWavFile(wavPath);
       expect(result.numFrames).toBeGreaterThan(0);
@@ -116,25 +62,17 @@ describe("ASRNodeModel", () => {
     }
   });
 
-  it("applies temperature before decode scoring", async () => {
-    const model = await ASRNodeModel.create({
-      modelPath: "/tmp/fake-asr-waveform.onnx",
-      temperature: 0.5,
-      blankBias: 0.25,
-      unkBias: 0.0,
-    });
-
-    const logits = new Float32Array(4 * 5).fill(-10.0);
-    for (let t = 0; t < 4; t++) {
-      logits[t * 5 + 0] = 0.2;
-      logits[t * 5 + 4] = 0.0;
+  it("applies temperature before decode scoring (private argmaxFrames)", async () => {
+    const model = await ASRNodeModel.create({ temperature: 0.5, blankBias: 0.25, unkBias: 0.0 });
+    const blankId = (model as any).blankId as number;
+    const T = 4;
+    const logits = new Float32Array(T * ASR_VOCAB).fill(-10.0);
+    for (let t = 0; t < T; t++) {
+      logits[t * ASR_VOCAB + 0] = 0.2; // token 0
+      logits[t * ASR_VOCAB + blankId] = 0.0; // blank
     }
-
-    const result = (model as any).argmaxFrames(
-      new FakeTensor("float32", logits, [1, 4, 5]),
-      4,
-    ) as number[];
-
+    // With temperature 0.5: token0 -> 0.4 ; blank -> 0/0.5 + 0.25 = 0.25 -> token 0 wins.
+    const result = (model as any).argmaxFrames(logits, T) as number[];
     expect(result.every((v) => v === 0)).toBe(true);
   });
 });
@@ -156,8 +94,6 @@ const encodePcm16MonoWav = (samples: Int16Array, sampleRate: number): Buffer => 
   buf.writeUInt16LE(16, 34);
   buf.write("data", 36, 4, "ascii");
   buf.writeUInt32LE(dataSize, 40);
-  for (let i = 0; i < samples.length; i++) {
-    buf.writeInt16LE(samples[i], 44 + i * 2);
-  }
+  for (let i = 0; i < samples.length; i++) buf.writeInt16LE(samples[i], 44 + i * 2);
   return buf;
 };

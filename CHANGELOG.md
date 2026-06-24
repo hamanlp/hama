@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.4.0 - 2026-06-24
+
+- Replaced ONNX Runtime with a self-contained inference engine written from scratch in Zig. `onnxruntime` (Python) and `onnxruntime-node` / `onnxruntime-web` (TypeScript) are no longer dependencies.
+  - Python calls a native shared library (`libhama`) via `ctypes`; the wheel bundles prebuilt libraries for macOS (arm64/x86_64) and Linux (x86_64/aarch64) under `hama/_libs/<platform>/`.
+  - TypeScript loads one freestanding `hama.wasm` (~31 KB, ReleaseSmall) in Node/Bun and the browser.
+  - Models ship as flat `.hama` weight packages (converted from the original `.onnx` via `tools/convert_onnx.py`); the source `.onnx` files live under the top-level `assets/` and are no longer packaged.
+- No behavior change: the engine reproduces the previous ONNX Runtime outputs. A committed golden corpus captured from ONNX Runtime (`tests/fixtures/`) is asserted byte-for-byte by both runtimes — G2P IPA/alignments and ASR phonemes/frames match exactly across the corpus.
+- The G2P encoder, location-aware decoder, and the waveform ASR acoustic model (STFT → mel → conv backbone with squeeze-excite → transformer → CTC) are all hand-written Zig, validated stage-by-stage against ONNX Runtime intermediates.
+- Aligned Python `hama` and TypeScript `hama-js` on version `1.4.0`.
+
 ## v1.3.13 - 2026-06-10
 
 - Sped up character-span pronunciation matching by 4-40x in both runtimes. Candidate windows are now pre-screened with approximate phonemes sliced from each token's character alignments (length, q-gram, and banded edit-distance filters with slack), so the G2P model only runs on windows that plausibly match.

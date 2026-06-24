@@ -12,17 +12,36 @@ It ships two runtimes in one monorepo:
 - TypeScript package: `hama-js`
 
 Primary goals:
-- Minimal runtime dependencies
+- Minimal runtime dependencies (no onnxruntime)
 - Consistent outputs across Python and TypeScript
-- Embedded ONNX assets for default inference without extra setup
+- Embedded model weights for default inference without extra setup
+
+Inference engine (since v1.4.0):
+- Inference runs on a self-contained engine written from scratch in Zig (see `zig/`).
+- Python calls a native shared library (`libhama`) via ctypes; TypeScript loads one
+  freestanding `hama.wasm` (Node/Bun and browser).
+- There is NO `onnxruntime` dependency. Models ship as flat `.hama` weight packages,
+  converted from the source `.onnx` (kept in top-level `assets/`) via `tools/convert_onnx.py`.
+- The engine reproduces the previous ONNX Runtime outputs byte-for-byte on a committed
+  golden corpus (`tests/fixtures/`).
 
 
 Repository Layout
 -----------------
 - `README.md`
   Top-level user documentation.
+- `MAINTAINING.md`
+  Model-update + release runbook (architecture vs weights, validation, publish).
+- `zig/`
+  The inference engine (kernels, per-model forward passes, C-ABI + wasm exports).
+- `tools/`
+  Build/dev tooling: `convert_onnx.py` (.onnx -> .hama), `build_libs.sh`
+  (native libs), `capture_golden.py` / `dump_oracle.py` / `make_fixtures.py` (ORT
+  golden + validation fixtures).
 - `assets/`
-  Shared top-level vocab copy (project-level reference).
+  Source `.onnx` models + shared vocab (converted to `.hama`; not shipped).
+- `tests/fixtures/`
+  Committed golden corpus + audio captured from ONNX Runtime.
 - `examples/`
   Root-level runnable examples.
 - `python/`
@@ -49,17 +68,21 @@ TypeScript package layout:
   Validation scripts.
 
 
-Shipped ONNX Assets
+Shipped Model Assets
 -------------------
 Python and TS embed these assets under package-specific `assets/` directories:
-- `encoder.onnx`
-- `decoder_step.onnx`
-- `asr_waveform_fp16.onnx`
+- `encoder.hama`          (G2P encoder weights)
+- `decoder_step.hama`     (G2P decoder-step weights)
+- `asr_waveform.hama`     (ASR waveform model weights)
 - `g2p_vocab.json`
+- `hama.wasm`             (TypeScript only — the engine)
 
-G2P uses split ONNX by default (`encoder.onnx` + `decoder_step.onnx`).
-ASR uses exactly one packaged runtime asset: `asr_waveform_fp16.onnx`.
-That ONNX must accept `waveform` + `waveform_lengths`.
+`.hama` files are flat weight archives (parser: `zig/src/pkg.zig`). The native
+engine libraries ship under `python/src/hama/_libs/<platform>/`. G2P always uses
+the split weights (`encoder.hama` + `decoder_step.hama`); ASR uses
+`asr_waveform.hama`, which consumes `waveform` + `waveform_lengths` and produces
+`log_probs` + `out_lengths`. The shipped engine libraries/wasm contain no weights
+— `.hama` are loaded at runtime.
 
 
 Installation
@@ -181,7 +204,7 @@ Quick Start: Browser ASR
 import { ASRBrowserModel } from "hama-js/asr/browser";
 
 const model = await ASRBrowserModel.create({
-  modelUrl: "/assets/asr_waveform_fp16.onnx",
+  modelUrl: "/assets/asr_waveform.hama",
 });
 const out = await model.transcribeWaveform(float32Samples, 16000);
 console.log(out.phonemeText);
@@ -218,8 +241,9 @@ Constructor:
 - `G2PModel(model_path=None, encoder_model_path=None, decoder_step_model_path=None, vocab_path=None, max_input_len=128, max_output_len=32, providers=None)`
 
 Behavior:
-- Uses split ONNX when encoder+decoder-step assets are available.
-- Falls back to single-file model path when explicitly provided.
+- Uses the split G2P weights (`encoder.hama` + `decoder_step.hama`), run by the Zig engine.
+- `encoder_model_path`/`decoder_step_model_path` may point to `.hama` files (or `.onnx`
+  paths whose sibling `.hama` exists); otherwise the packaged assets are used.
 
 Inference:
 - `predict(text, split_delimiter=r"\s+", output_delimiter=" ", preserve_literals="none" | "punct") -> G2PResult`
@@ -333,9 +357,9 @@ Inference methods:
 - `__call__(waveform, sample_rate) -> ASRResult`
 
 Model contract:
-- Packaged default asset name: `asr_waveform_fp16.onnx`
-- Required ONNX inputs: `waveform`, `waveform_lengths`
-- Required ONNX outputs: `log_probs`, `out_lengths`
+- Packaged default asset name: `asr_waveform.hama`
+- Engine inputs: `waveform`, `waveform_lengths`
+- Engine outputs: `log_probs`, `out_lengths`
 - hama ASR is waveform-only; there is no public feature-input path
 
 Output (`ASRResult`):
@@ -426,7 +450,7 @@ Output (`ASRResult`):
 - `numFrames: number`
 
 Design choice:
-- TS ASR is waveform-only and expects a waveform-input ONNX.
+- TS ASR is waveform-only (waveform-input model run by the WASM engine).
 - No additional third-party DSP packages were introduced.
 
 
@@ -581,11 +605,16 @@ Python package (`python/pyproject.toml`)
 ----------------------------------------
 - Name: `hama`
 - Python >= 3.9
-- Core deps: `numpy`, `onnxruntime`
+- Core deps: `numpy` (no onnxruntime)
 - Extras:
   - `test`
   - `live`
-- Package data includes ONNX + JSON assets via setuptools config.
+  - `dev` (onnx + onnxruntime, for regenerating `.hama` and ORT validation fixtures)
+- Package data includes `.hama` weights, `g2p_vocab.json`, and the prebuilt native
+  engine libraries under `_libs/<platform>/` (single `py3-none-any` wheel bundling
+  all platforms; Linux libs pinned to glibc 2.17 / manylinux2014).
+- Native libs are built by `tools/build_libs.sh`; `.hama` by `tools/convert_onnx.py`.
+  See `MAINTAINING.md` for the model-update + release runbook.
 
 TypeScript package (`ts/package.json`)
 --------------------------------------
@@ -606,9 +635,12 @@ Release notes
 Troubleshooting
 ===============
 
-1) ONNX load failure
-- Ensure assets are present in packaged `assets/` directory.
-- Verify ONNX runtime version compatibility.
+1) Engine/library load failure
+- Ensure `.hama` assets are present in the packaged `assets/` directory.
+- Python: ensure a native lib for your platform exists under `hama/_libs/<platform>/`
+  (currently macOS arm64/x86_64, Linux x86_64/aarch64); other platforms raise a clear
+  error at model construction.
+- TS: ensure `hama.wasm` is served/bundled next to the module.
 
 2) No phoneme output from ASR
 - Check that input sample rate matches the model expectation (default 16k).
