@@ -21,8 +21,13 @@ Inference engine (since v1.4.0):
 - Inference runs on a self-contained engine written from scratch in Zig (see `zig/`).
 - Python calls a native shared library (`libhama`) via ctypes; TypeScript loads one
   freestanding `hama.wasm` (Node/Bun and browser).
-- There is NO `onnxruntime` dependency. Models ship as flat `.hama` weight packages,
-  converted from the source `.onnx` (kept in top-level `assets/`) via `tools/convert_onnx.py`.
+- There is NO `onnxruntime` dependency. Models ship as flat `.hama` weight packages.
+  G2P + ASR are converted from the source `.onnx` (kept in top-level `assets/`) via
+  `tools/convert_onnx.py`; P2G (added in v1.5.0) is converted directly from its PyTorch
+  checkpoint via `tools/convert_torch.py` — no ONNX. P2G weights ship as float16
+  (G2P/ASR already did); the engine upcasts to float32 at load.
+- v1.5.0 hand-vectorizes the matmul/projection kernels with explicit SIMD and enables
+  wasm `simd128` (~4x faster P2G decode in the browser/Node); outputs are unchanged.
 - The engine reproduces the previous ONNX Runtime outputs byte-for-byte on a committed
   golden corpus (`tests/fixtures/`).
 
@@ -191,6 +196,9 @@ console.log(out.phonemeText);
 
 Quick Start: Browser G2P
 ------------------------
+Note: under a bundler (Vite/Webpack/Astro/Next) you must pass explicit asset URLs and
+exclude the browser entries from pre-bundling — see "Browser / Bundler Integration".
+The no-arg `create()` below works in a plain `<script type="module">`, not through a bundler.
 ```ts
 import { G2PBrowserModel } from "hama-js/g2p/browser";
 
@@ -211,6 +219,24 @@ const model = await ASRBrowserModel.create({
 const out = await model.transcribeWaveform(float32Samples, 16000);
 console.log(out.phonemeText);
 ```
+
+
+Quick Start: TS P2G (Node + Browser)
+------------------------------------
+```ts
+// Node/Bun:
+import { P2GNodeModel } from "hama-js/p2g";
+const p2g = await P2GNodeModel.create();
+const out = p2g.predict("l ɛ t | m i | s i");  // token list or space-separated string; `|` = word boundary
+console.log(out.text, out.tokens);
+
+// Browser (under a bundler): pass an explicit weights URL — see "Browser / Bundler Integration".
+import { P2GBrowserModel } from "hama-js/p2g/browser";
+const p2gWeb = await P2GBrowserModel.create({ modelUrl: p2gUrl });
+```
+
+Tip: to go audio -> text, feed the ASR result's `wordPhonemeText` (which carries the
+`|` word boundaries from the model's `<wb>` predictions) into P2G.
 
 
 Python API Reference
@@ -399,17 +425,25 @@ Node/Bun exports
 From `hama-js` (root) and subpaths:
 - `hama-js/g2p` -> G2P node runtime
 - `hama-js/asr` -> ASR node runtime
+- `hama-js/p2g` -> P2G (phoneme-to-grapheme) node runtime
 - `hama-js/g2p/browser` -> browser G2P runtime
 - `hama-js/asr/browser` -> browser ASR runtime
-- `hama-js/browser` -> browser G2P + ASR runtime
+- `hama-js/p2g/browser` -> browser P2G runtime
+- `hama-js/browser` -> browser G2P + ASR + P2G runtime
 
 Core TS exports:
 - `G2PNodeModel`
 - `ASRNodeModel`
+- `P2GNodeModel`
 - `pronunciationScan`
 - `pronunciationReplace`
 - `decodeCtcTokens`
 - tokenizer/jamo helpers
+
+P2G (TS):
+- `P2GNodeModel` (`hama-js/p2g`) / `P2GBrowserModel` (`hama-js/p2g/browser`)
+- `await create({ modelPath? } | { modelUrl? })` then `predict(phonemes) -> { text, tokens }`
+- `phonemes`: token list or space-separated string; ` | ` marks word boundaries
 
 
 G2PNodeModel
@@ -497,6 +531,52 @@ WAV support (TS):
 - PCM int WAV: 8/16/24/32-bit
 - float WAV: 32-bit
 - Multi-channel is mixed to mono.
+
+
+Browser / Bundler Integration
+=============================
+The browser models fetch `hama.wasm` and the `.hama` weight packages at runtime,
+resolved relative to the hama-js module via `import.meta.url`. In a plain
+`<script type="module">` the no-arg `create()` resolves them automatically. Under a
+bundler (Vite, Webpack, Astro, Next, etc.) that resolution usually fails, so do two things:
+
+1) Exclude the browser entries from dependency pre-bundling (Vite / Astro example):
+```js
+// astro.config.mjs (nest under `vite: { ... }`) or vite.config.*
+export default {
+  optimizeDeps: {
+    exclude: [
+      'hama-js/browser',
+      'hama-js/g2p/browser',
+      'hama-js/asr/browser',
+      'hama-js/p2g/browser',
+    ],
+  },
+};
+```
+
+2) Resolve the `.hama` weight URLs yourself and pass them to `create()`. The token
+   vocabs are bundled (inlined) inside the hama-js browser build, so you only resolve
+   the weight packages:
+```ts
+// `u()` resolves a shipped weight relative to THIS source file; adjust the
+// `../../node_modules/...` depth to where your file lives.
+const u = (name: string) =>
+  new URL(`../../node_modules/hama-js/dist/browser/assets/${name}`, import.meta.url).toString();
+
+// G2P uses the split weights:
+const g2p = await G2PBrowserModel.create({ encoderUrl: u("encoder.hama"), decoderStepUrl: u("decoder_step.hama") });
+// ASR and P2G each take one weight package:
+const asr = await ASRBrowserModel.create({ modelUrl: u("asr_waveform.hama") });
+const p2g = await P2GBrowserModel.create({ modelUrl: u("p2g.hama") });
+```
+   The wasm engine (`hama.wasm`) is fetched internally from the same assets dir —
+   make sure your bundler/dev server can serve files from
+   `node_modules/hama-js/dist/browser/assets/`.
+
+Approximate first-load downloads (lazy, on first `create()`): engine `hama.wasm`
+~39 KB; G2P `encoder.hama` ~3.8 MB + `decoder_step.hama` ~0.4 MB; ASR
+`asr_waveform.hama` ~4.9 MB; P2G `p2g.hama` ~14.6 MB (fp16).
 
 
 Decoding Semantics
