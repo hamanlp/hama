@@ -60,3 +60,35 @@ export const renderText = (tokens: readonly string[]): string => {
 
 export const normalizeP2gText = (text: string): string =>
   text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+
+export interface P2GAlignment {
+  token: string; // output grapheme token
+  phonemeIndex: number; // source phoneme index it most attends to (-1 if unaligned)
+  phoneme: string; // source phoneme token at that index ("" if unaligned)
+}
+
+export interface P2GDecoded {
+  text: string;
+  tokens: string[];
+  alignments: P2GAlignment[];
+}
+
+/** Filter special tokens and pair each kept output token with its source-phoneme
+ *  alignment, shared by the Node and browser P2G models. */
+export const decodeP2GOutput = (
+  genIds: readonly number[],
+  align: readonly number[],
+  tokens: readonly string[],
+  source: readonly string[],
+): P2GDecoded => {
+  const outTokens: string[] = [];
+  const alignments: P2GAlignment[] = [];
+  for (let i = 0; i < genIds.length; i++) {
+    const token = tokens[genIds[i]];
+    if (P2G_SPECIAL_TOKENS.has(token)) continue;
+    outTokens.push(token);
+    const ai = align[i] ?? -1;
+    alignments.push({ token, phonemeIndex: ai, phoneme: ai >= 0 && ai < source.length ? source[ai] : "" });
+  }
+  return { text: normalizeP2gText(renderText(outTokens)), tokens: outTokens, alignments };
+};

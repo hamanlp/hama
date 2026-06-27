@@ -3,7 +3,7 @@
 import vocabData from "./assets/p2g_vocab.json";
 import { HamaEngine } from "./engine.js";
 import { loadWasm, resolveModelBytes } from "./engine.node.js";
-import { normalizePhonemeTokens, normalizeP2gText, P2G_SPECIAL_TOKENS, renderText } from "./p2g-text.js";
+import { decodeP2GOutput, normalizePhonemeTokens, type P2GAlignment } from "./p2g-text.js";
 
 export const P2G_MAX_INPUT_LEN = 192;
 export const P2G_MAX_OUTPUT_LEN = 192;
@@ -17,6 +17,7 @@ export interface P2GOptions {
 export interface P2GResult {
   text: string;
   tokens: string[];
+  alignments: P2GAlignment[];
 }
 
 interface VocabularyLike {
@@ -72,10 +73,9 @@ export class P2GNodeModel {
     }
     const maxNew = Math.min(P2G_MAX_OUTPUT_LEN + 1, P2G_MAX_SEQUENCE_LEN - prefix.length);
 
-    const genIds = this.engine.p2gGreedy(
+    const { ids, align } = this.engine.p2gGreedyAlign(
       this.handle, BigInt64Array.from(prefix, BigInt), maxNew, this.eos, this.pad,
     );
-    const genTokens = genIds.map((id) => this.tokens[id]).filter((t) => !P2G_SPECIAL_TOKENS.has(t));
-    return { text: normalizeP2gText(renderText(genTokens)), tokens: genTokens };
+    return decodeP2GOutput(ids, align, this.tokens, source);
   }
 }

@@ -105,6 +105,8 @@ def _bind() -> None:
     L.hama_p2g_free.argtypes = [ctypes.c_void_p]
     L.hama_p2g_greedy.argtypes = [ctypes.c_void_p, c_i64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64, c_i64]
     L.hama_p2g_greedy.restype = ctypes.c_int64
+    L.hama_p2g_greedy_align.argtypes = [ctypes.c_void_p, c_i64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64, c_i64, c_i64]
+    L.hama_p2g_greedy_align.restype = ctypes.c_int64
 
 
 _bind()
@@ -270,6 +272,21 @@ class P2gSession:
         if n < 0:
             raise RuntimeError("hama_p2g_greedy failed")
         return out[:n].tolist()
+
+    def greedy_align(
+        self, prefix_ids: list[int], max_new: int, eos_id: int, pad_id: int
+    ) -> tuple[list[int], list[int]]:
+        """Greedy decode returning (generated ids, source-phoneme index per token)."""
+        prefix = np.ascontiguousarray(prefix_ids, dtype=np.int64)
+        out = np.empty(max_new, dtype=np.int64)
+        align = np.empty(max_new, dtype=np.int64)
+        n = _LIB.hama_p2g_greedy_align(
+            self._h, prefix.ctypes.data_as(c_i64), prefix.shape[0], max_new, eos_id, pad_id,
+            out.ctypes.data_as(c_i64), align.ctypes.data_as(c_i64),
+        )
+        if n < 0:
+            raise RuntimeError("hama_p2g_greedy_align failed")
+        return out[:n].tolist(), align[:n].tolist()
 
     def __del__(self):
         if getattr(self, "_h", None) and _LIB is not None:

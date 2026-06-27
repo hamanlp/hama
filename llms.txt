@@ -249,6 +249,7 @@ Core exports from `hama`
 - `G2PAlignment`
 - `P2GModel`
 - `P2GResult`
+- `P2GAlignment`
 - `PronunciationTerm`
 - `PronunciationMatch`
 - `PronunciationPatch`
@@ -258,6 +259,8 @@ Core exports from `hama`
 - `ASRResult`
 - `ASRDecodeConfig`
 - `decode_ctc_tokens`
+- `ctc_phoneme_spans`
+- `PhonemeSpan`
 - `read_wav_mono`
 - `split_text_to_jamo`
 - `join_jamo_tokens`
@@ -303,7 +306,11 @@ Decoder-only PrefixLM that turns phoneme tokens into text (inverse of G2P).
 - `P2GModel(model_path=None, vocab_path=None)`
 - `predict(phonemes) -> P2GResult` ; `__call__` delegates to `predict`
   - `phonemes`: a list of phoneme tokens or a space-separated string (`|` = word boundary)
-- `P2GResult`: `text: str`, `tokens: list[str]` (raw decoded char tokens)
+- `P2GResult`: `text: str`, `tokens: list[str]` (raw decoded char tokens),
+  `alignments: list[P2GAlignment]`
+- `P2GAlignment`: `token: str`, `phoneme_index: int` (source phoneme it most attends
+  to, -1 if unaligned), `phoneme: str`. Parallel to `tokens`; derived from the
+  decoder's attention. TS: `{ token, phonemeIndex, phoneme }`.
 - TS: `P2GNodeModel` (`hama-js/p2g`) and `P2GBrowserModel` (`hama-js/p2g/browser`),
   both with `await create()` then `predict(phonemes)`.
 
@@ -396,6 +403,7 @@ Inference methods:
 - `transcribe_file(wav_path) -> ASRResult`
 - `transcribe_waveform(waveform, sample_rate) -> ASRResult`
 - `__call__(waveform, sample_rate) -> ASRResult`
+- `phoneme_spans(result) -> list[PhonemeSpan]`  (approximate per-phoneme time spans)
 
 Model contract:
 - Packaged default asset name: `asr_waveform.hama`
@@ -410,6 +418,13 @@ Output (`ASRResult`):
 - `token_ids: list[int]`              (collapsed non-blank token ids)
 - `frame_token_ids: list[int]`        (argmax per frame)
 - `num_frames: int`
+
+Time alignment (`PhonemeSpan`, from `phoneme_spans(result)` or the standalone
+`ctc_phoneme_spans(...)`):
+- `phoneme: str`, `start_ms: float`, `end_ms: float`, `start_frame: int`, `end_frame: int`
+- One span per emitted phoneme, tiling the output-frame timeline. CTC is peaky, so
+  these are coarse acoustic spans, not exact boundaries. TS fields are
+  `{ phoneme, startMs, endMs, startFrame, endFrame }`.
 
 WAV support (Python):
 - mono/stereo WAV
@@ -438,11 +453,15 @@ Core TS exports:
 - `pronunciationScan`
 - `pronunciationReplace`
 - `decodeCtcTokens`
+- `ctcPhonemeSpans` / `PhonemeSpan`
 - tokenizer/jamo helpers
 
 P2G (TS):
 - `P2GNodeModel` (`hama-js/p2g`) / `P2GBrowserModel` (`hama-js/p2g/browser`)
-- `await create({ modelPath? } | { modelUrl? })` then `predict(phonemes) -> { text, tokens }`
+- `await create({ modelPath? } | { modelUrl? })` then
+  `predict(phonemes) -> { text, tokens, alignments }`
+- `alignments`: `{ token, phonemeIndex, phoneme }[]`, parallel to `tokens`, mapping
+  each output token to the input phoneme it most attends to (`phonemeIndex` -1 if unaligned)
 - `phonemes`: token list or space-separated string; ` | ` marks word boundaries
 
 
@@ -489,6 +508,7 @@ Create:
 Inference methods:
 - `transcribeWavFile(path)`
 - `transcribeWaveform(samples, sampleRate)`
+- `phonemeSpans(result)` -> approximate per-phoneme time spans (`PhonemeSpan[]`)
 
 Output (`ASRResult`):
 - `phonemes: string[]`
@@ -510,6 +530,7 @@ Create:
 
 Inference methods:
 - `transcribeWaveform(samples, sampleRate)`
+- `phonemeSpans(result)` -> approximate per-phoneme time spans (`PhonemeSpan[]`)
 
 Output (`ASRResult`):
 - `phonemes: string[]`

@@ -12,11 +12,13 @@ from .asr import (
     ASRDecodeConfig,
     ASRModel,
     ASRResult,
+    PhonemeSpan,
+    ctc_phoneme_spans,
     decode_ctc_tokens,
     read_wav_mono,
 )
 from .inference import G2PAlignment, G2PModel, G2PResult
-from .p2g import P2GModel, P2GResult
+from .p2g import P2GAlignment, P2GModel, P2GResult
 from .pronunciation import (
     PronunciationMatch,
     PronunciationPatch,
@@ -39,6 +41,7 @@ __all__ = [
     "G2PResult",
     "P2GModel",
     "P2GResult",
+    "P2GAlignment",
     "PronunciationTerm",
     "PronunciationMatch",
     "PronunciationPatch",
@@ -51,6 +54,8 @@ __all__ = [
     "ASRDecodeConfig",
     "ASRModel",
     "ASRResult",
+    "PhonemeSpan",
+    "ctc_phoneme_spans",
     "decode_ctc_tokens",
     "read_wav_mono",
     "TextTokenizer",

@@ -194,6 +194,27 @@ export fn hama_p2g_greedy(
     const mn: usize = @intCast(max_new);
     var arena = std.heap.ArenaAllocator.init(galloc);
     defer arena.deinit();
-    const n = h.model.greedyCached(arena.allocator(), prefix_ids[0..P], mn, eos, pad, out[0..mn]) catch return -1;
+    const n = h.model.greedyCached(arena.allocator(), prefix_ids[0..P], mn, eos, pad, out[0..mn], null) catch return -1;
+    return @intCast(n);
+}
+
+/// Greedy decode + output->input alignment. Like hama_p2g_greedy, but also fills
+/// out_align[0..n] with the source-phoneme index each generated token most attends
+/// to (-1 if unaligned). out_align must hold max_new i64s.
+export fn hama_p2g_greedy_align(
+    h: *P2gHandle,
+    prefix_ids: [*]const i64,
+    prefix_len: i64,
+    max_new: i64,
+    eos: i64,
+    pad: i64,
+    out: [*]i64,
+    out_align: [*]i64,
+) i64 {
+    const P: usize = @intCast(prefix_len);
+    const mn: usize = @intCast(max_new);
+    var arena = std.heap.ArenaAllocator.init(galloc);
+    defer arena.deinit();
+    const n = h.model.greedyCached(arena.allocator(), prefix_ids[0..P], mn, eos, pad, out[0..mn], out_align[0..mn]) catch return -1;
     return @intCast(n);
 }

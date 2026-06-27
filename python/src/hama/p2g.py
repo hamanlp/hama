@@ -97,9 +97,17 @@ def normalize_p2g_text(text: str, *, lowercase: bool = True) -> str:
 
 
 @dataclass
+class P2GAlignment:
+    token: str  # output grapheme token
+    phoneme_index: int  # source phoneme index it most attends to (-1 if unaligned)
+    phoneme: str  # source phoneme token at that index ("" if unaligned)
+
+
+@dataclass
 class P2GResult:
     text: str
     tokens: List[str]
+    alignments: List[P2GAlignment]
 
 
 def _load_vocab(vocab_path: Path | None) -> List[str]:
@@ -141,6 +149,18 @@ class P2GModel:
             prefix = prefix[: MAX_SEQUENCE_LEN - 1] + [self.tgt_id]
         max_new = min(MAX_OUTPUT_LEN + 1, MAX_SEQUENCE_LEN - len(prefix))
 
-        gen_ids = self.session.greedy(prefix, max_new, self.eos_id, self.pad_id)
-        gen_tokens = [self.tokens[i] for i in gen_ids if self.tokens[i] not in SPECIAL_TOKENS]
-        return P2GResult(text=normalize_p2g_text(render_text(gen_tokens)), tokens=gen_tokens)
+        gen_ids, align_idx = self.session.greedy_align(prefix, max_new, self.eos_id, self.pad_id)
+        gen_tokens: List[str] = []
+        alignments: List[P2GAlignment] = []
+        for token_id, ai in zip(gen_ids, align_idx):
+            token = self.tokens[token_id]
+            if token in SPECIAL_TOKENS:
+                continue
+            gen_tokens.append(token)
+            phoneme = source[ai] if 0 <= ai < len(source) else ""
+            alignments.append(P2GAlignment(token=token, phoneme_index=ai, phoneme=phoneme))
+        return P2GResult(
+            text=normalize_p2g_text(render_text(gen_tokens)),
+            tokens=gen_tokens,
+            alignments=alignments,
+        )

@@ -28,6 +28,10 @@ interface WasmExports {
   hama_p2g_greedy: (
     h: number, prefixIds: number, prefixLen: number, maxNew: number, eos: bigint, pad: bigint, out: number,
   ) => bigint;
+  hama_p2g_greedy_align: (
+    h: number, prefixIds: number, prefixLen: number, maxNew: number, eos: bigint, pad: bigint,
+    out: number, outAlign: number,
+  ) => bigint;
 }
 
 export const ENC_FEAT = 192;
@@ -121,6 +125,27 @@ export class HamaEngine {
     this.ex.hama_free(pPtr, P * 8);
     this.ex.hama_free(outPtr, maxNew * 8);
     return Array.from(out.slice(0, n), Number);
+  }
+
+  /** Greedy decode + per-token source-phoneme alignment index (-1 if unaligned). */
+  p2gGreedyAlign(
+    h: number, prefixIds: BigInt64Array, maxNew: number, eos: number, pad: number,
+  ): { ids: number[]; align: number[] } {
+    const P = prefixIds.length;
+    const pPtr = this.ex.hama_alloc(P * 8);
+    const outPtr = this.ex.hama_alloc(maxNew * 8);
+    const alignPtr = this.ex.hama_alloc(maxNew * 8);
+    this.writeI64(pPtr, prefixIds);
+    const n = Number(
+      this.ex.hama_p2g_greedy_align(h, pPtr, P, maxNew, BigInt(eos), BigInt(pad), outPtr, alignPtr),
+    );
+    if (n < 0) throw new Error("hama_p2g_greedy_align failed");
+    const ids = Array.from(this.readI64(outPtr, maxNew).slice(0, n), Number);
+    const align = Array.from(this.readI64(alignPtr, maxNew).slice(0, n), Number);
+    this.ex.hama_free(pPtr, P * 8);
+    this.ex.hama_free(outPtr, maxNew * 8);
+    this.ex.hama_free(alignPtr, maxNew * 8);
+    return { ids, align };
   }
 
   encoderRun(h: number, ids: BigInt64Array, length: number): EncoderOut {

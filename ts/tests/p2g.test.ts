@@ -25,4 +25,13 @@ describe("P2G golden parity (wasm vs PyTorch)", () => {
       expect(result.text).toBe(c.hyp_text);
     });
   }
+
+  it("alignments are parallel to tokens and well-formed", async () => {
+    const result = (await modelPromise).predict(cases[0].phoneme);
+    expect(result.alignments.length).toBe(result.tokens.length);
+    for (const a of result.alignments) {
+      expect(a.phonemeIndex).toBeGreaterThanOrEqual(0);
+      expect(a.phoneme.length).toBeGreaterThan(0);
+    }
+  });
 });

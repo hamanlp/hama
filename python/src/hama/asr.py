@@ -173,6 +173,67 @@ def decode_ctc_tokens(
     return collapsed_ids, [t for t in tokens if t != word_boundary_token], words
 
 
+# The shipped ASR model subsamples by 2 over a 160-sample STFT hop, so each output
+# frame (one entry of `frame_token_ids`) spans 160 * 2 = 320 input samples.
+ASR_OUTPUT_FRAME_SAMPLES = 320
+
+
+@dataclass
+class PhonemeSpan:
+    phoneme: str
+    start_ms: float
+    end_ms: float
+    start_frame: int
+    end_frame: int
+
+
+def ctc_phoneme_spans(
+    frame_token_ids: Sequence[int],
+    decoder_tokens: Sequence[str],
+    *,
+    blank_id: int,
+    word_boundary_token: str,
+    frame_ms: float,
+    collapse_repeats: bool = True,
+) -> List[PhonemeSpan]:
+    """Approximate time alignment for ASR output.
+
+    Returns one `PhonemeSpan` per emitted phoneme (same emissions as
+    `decode_ctc_tokens`, `<wb>` excluded), tiling the output-frame timeline:
+    a phoneme runs from the frame it is emitted until the next emission (or the
+    end). CTC is peaky, so these are coarse acoustic spans, not precise boundaries.
+    """
+    emissions: List[tuple[int, str]] = []  # (frame_index, token_str)
+    prev = -1
+    for frame, token_id in enumerate(frame_token_ids):
+        tok = int(token_id)
+        if collapse_repeats and tok == prev:
+            continue
+        prev = tok
+        if tok == blank_id:
+            continue
+        emissions.append(
+            (frame, decoder_tokens[tok] if 0 <= tok < len(decoder_tokens) else "<unk>")
+        )
+
+    n_frames = len(list(frame_token_ids)) if not isinstance(frame_token_ids, (list, tuple)) else len(frame_token_ids)
+    spans: List[PhonemeSpan] = []
+    for i, (frame, token) in enumerate(emissions):
+        if token == word_boundary_token:
+            continue
+        end_frame = emissions[i + 1][0] if i + 1 < len(emissions) else n_frames
+        spans.append(
+            PhonemeSpan(
+                phoneme=token,
+                start_ms=frame * frame_ms,
+                end_ms=end_frame * frame_ms,
+                start_frame=frame,
+                end_frame=end_frame,
+            )
+        )
+    return spans
+
+
 class ASRModel:
     def __init__(
         self,
@@ -238,6 +299,18 @@ class ASRModel:
         )
         out_lengths_arr = np.asarray(out_lengths).reshape(-1)
         return self._decode_single(log_probs[0], int(out_lengths_arr[0]))
+
+    def phoneme_spans(self, result: ASRResult) -> List[PhonemeSpan]:
+        """Approximate per-phoneme time spans (ms) from an `ASRResult`."""
+        frame_ms = 1000.0 * ASR_OUTPUT_FRAME_SAMPLES / float(self.model_sample_rate)
+        return ctc_phoneme_spans(
+            result.frame_token_ids,
+            self.decoder_tokens,
+            blank_id=self.blank_id,
+            word_boundary_token=self.decode_cfg.word_boundary_token,
+            frame_ms=frame_ms,
+            collapse_repeats=self.decode_cfg.collapse_repeats,
+        )
 
     def _decode_single(self, log_probs: np.ndarray, out_length: int) -> ASRResult:
         valid = max(0, min(int(out_length), int(log_probs.shape[0])))

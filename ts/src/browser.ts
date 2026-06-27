@@ -1,8 +1,12 @@
 import vocabData from "./assets/g2p_vocab.json";
 import p2gVocabData from "./assets/p2g_vocab.json";
+import { ASR_OUTPUT_FRAME_SAMPLES, ctcPhonemeSpans, type PhonemeSpan } from "./ctc.js";
+export { ctcPhonemeSpans, ASR_OUTPUT_FRAME_SAMPLES } from "./ctc.js";
+export type { PhonemeSpan } from "./ctc.js";
 import { ASR_VOCAB, HamaEngine } from "./engine.js";
 import { loadWasm, resolveModelBytes } from "./engine.browser.js";
-import { normalizePhonemeTokens, normalizeP2gText, P2G_SPECIAL_TOKENS, renderText } from "./p2g-text.js";
+import { decodeP2GOutput, normalizePhonemeTokens, type P2GAlignment } from "./p2g-text.js";
+export type { P2GAlignment } from "./p2g-text.js";
 
 import {
   buildDisplayIpa,
@@ -386,6 +390,16 @@ export class ASRBrowserModel {
     };
   }
 
+  /** Approximate per-phoneme time spans (ms) from an ASRResult. */
+  phonemeSpans(result: ASRResult): PhonemeSpan[] {
+    return ctcPhonemeSpans(result.frameTokenIds, this.decoderTokens, {
+      blankId: this.blankId,
+      wordBoundaryToken: this.wordBoundaryToken,
+      frameMs: (1000 * ASR_OUTPUT_FRAME_SAMPLES) / this.sampleRate,
+      collapseRepeats: this.collapseRepeats,
+    });
+  }
+
   private argmaxFrames(logProbs: Float32Array, numFrames: number): number[] {
     const classes = ASR_VOCAB;
     const out: number[] = [];
@@ -418,6 +432,7 @@ export interface P2GBrowserOptions {
 export interface P2GResult {
   text: string;
   tokens: string[];
+  alignments: P2GAlignment[];
 }
 
 const P2G_MAX_INPUT_LEN = 192;
@@ -468,9 +483,8 @@ export class P2GBrowserModel {
       prefix = [...prefix.slice(0, P2G_MAX_SEQUENCE_LEN - 1), this.tgt];
     }
     const maxNew = Math.min(P2G_MAX_OUTPUT_LEN + 1, P2G_MAX_SEQUENCE_LEN - prefix.length);
-    const genIds = this.engine.p2gGreedy(this.handle, BigInt64Array.from(prefix, BigInt), maxNew, this.eos, this.pad);
-    const genTokens = genIds.map((id) => this.tokens[id]).filter((t) => !P2G_SPECIAL_TOKENS.has(t));
-    return { text: normalizeP2gText(renderText(genTokens)), tokens: genTokens };
+    const { ids, align } = this.engine.p2gGreedyAlign(this.handle, BigInt64Array.from(prefix, BigInt), maxNew, this.eos, this.pad);
+    return decodeP2GOutput(ids, align, this.tokens, source);
   }
 }
 

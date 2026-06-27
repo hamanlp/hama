@@ -128,6 +128,9 @@ The public API lives in `hama.__init__`:
   return collapsed phoneme output from the ASR waveform model
 - `ASRResult` includes `phonemes`, `phoneme_text`, `word_phoneme_text`,
   `token_ids`, and frame-level `frame_token_ids`
+- `ASRModel.phoneme_spans(result)` returns approximate per-phoneme time spans
+  (`PhonemeSpan{phoneme, start_ms, end_ms, start_frame, end_frame}`) derived from
+  the CTC frame alignment — coarse acoustic spans, since CTC is peaky
 
 Pass `encoder_model_path` + `decoder_step_model_path` (recommended split mode),
 or `model_path` (single-file fallback), plus optional `vocab_path` for custom assets.
@@ -222,7 +225,9 @@ API overview:
 - `ASRNodeModel.inputFormat` is always `"waveform"`
 - `ASRResult`
   → `{ phonemes, phonemeText, wordPhonemeText, tokenIds, frameTokenIds, numFrames }`
-- `decodeCtcTokens(...)` is exported for deterministic CTC post-processing tests
+- `model.phonemeSpans(result)` → approximate per-phoneme time spans
+  `{ phoneme, startMs, endMs, startFrame, endFrame }[]` (coarse — CTC is peaky)
+- `decodeCtcTokens(...)` / `ctcPhonemeSpans(...)` are exported for deterministic CTC post-processing tests
 - Browser bundle:
   - `import { G2PBrowserModel } from "hama-js/g2p/browser";`
   - `import { ASRBrowserModel } from "hama-js/asr/browser";`
@@ -309,7 +314,10 @@ console.log(result.text);
 ```
 
 Phonemes may be passed as a token list or a space-separated string (`|` marks word
-boundaries). `result.tokens` holds the raw decoded character tokens.
+boundaries). `result.tokens` holds the raw decoded character tokens, and
+`result.alignments` (Python `P2GAlignment{token, phoneme_index, phoneme}`, TS
+`{token, phonemeIndex, phoneme}`) maps each output token back to the input phoneme
+it most attends to, parallel to `tokens`.
 
 ## Shared design notes
 

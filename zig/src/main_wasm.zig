@@ -140,6 +140,16 @@ export fn hama_p2g_greedy(h: u32, prefix_ids: u32, prefix_len: u32, max_new: u32
     const mn: usize = max_new;
     var arena = std.heap.ArenaAllocator.init(galloc);
     defer arena.deinit();
-    const n = handle.model.greedyCached(arena.allocator(), cslice(i64, prefix_ids, P), mn, eos, pad, slice(i64, out, mn)) catch return -1;
+    const n = handle.model.greedyCached(arena.allocator(), cslice(i64, prefix_ids, P), mn, eos, pad, slice(i64, out, mn), null) catch return -1;
+    return @intCast(n);
+}
+
+export fn hama_p2g_greedy_align(h: u32, prefix_ids: u32, prefix_len: u32, max_new: u32, eos: i64, pad: i64, out: u32, out_align: u32) i64 {
+    const handle: *P2gHandle = @ptrFromInt(@as(usize, h));
+    const P: usize = prefix_len;
+    const mn: usize = max_new;
+    var arena = std.heap.ArenaAllocator.init(galloc);
+    defer arena.deinit();
+    const n = handle.model.greedyCached(arena.allocator(), cslice(i64, prefix_ids, P), mn, eos, pad, slice(i64, out, mn), slice(i64, out_align, mn)) catch return -1;
     return @intCast(n);
 }

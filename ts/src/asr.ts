@@ -1,6 +1,7 @@
 import fs from "node:fs";
 
 import vocabData from "./assets/g2p_vocab.json";
+import { ASR_OUTPUT_FRAME_SAMPLES, ctcPhonemeSpans, type PhonemeSpan } from "./ctc.js";
 import { ASR_VOCAB, HamaEngine } from "./engine.js";
 import { loadWasm, resolveModelBytes } from "./engine.node.js";
 
@@ -180,6 +181,16 @@ export class ASRNodeModel {
       frameTokenIds,
       numFrames,
     };
+  }
+
+  /** Approximate per-phoneme time spans (ms) from an ASRResult. */
+  phonemeSpans(result: ASRResult): PhonemeSpan[] {
+    return ctcPhonemeSpans(result.frameTokenIds, this.decoderTokens, {
+      blankId: this.blankId,
+      wordBoundaryToken: this.wordBoundaryToken,
+      frameMs: (1000 * ASR_OUTPUT_FRAME_SAMPLES) / this.sampleRate,
+      collapseRepeats: this.collapseRepeats,
+    });
   }
 
   private argmaxFrames(logProbs: Float32Array, numFrames: number): number[] {

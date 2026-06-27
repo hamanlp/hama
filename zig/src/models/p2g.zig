@@ -183,7 +183,9 @@ pub const P2G = struct {
 
     // One pre-norm transformer block over a single token's hidden state `x`
     // (length D), attending to cached keys/values for positions 0..=cur.
-    fn stepLayer(self: *const P2G, L: Layer, x: []f32, kc: []f32, vc: []f32, cur: usize, sc: anytype) !void {
+    // `attn_acc`, when non-null, accumulates this layer's head-summed attention
+    // weights over cached positions 0..=cur (used to derive output->input alignment).
+    fn stepLayer(self: *const P2G, L: Layer, x: []f32, kc: []f32, vc: []f32, cur: usize, attn_acc: ?[]f32, sc: anytype) !void {
         _ = self;
         const ln = sc[0..D];
         @memcpy(ln, x);
@@ -202,6 +204,9 @@ pub const P2G = struct {
                 scores[j] = s * SCALE;
             }
             k_soft.softmaxRow(scores, null);
+            if (attn_acc) |acc| {
+                for (0..cur + 1) |j| acc[j] += scores[j];
+            }
             for (0..HEAD) |d| {
                 var accv: f32 = 0;
                 for (0..cur + 1) |j| accv += scores[j] * vc[j * D + h * HEAD + d];
@@ -233,6 +238,7 @@ pub const P2G = struct {
         eos: i64,
         pad: i64,
         out: []i64,
+        align_out: ?[]i64,
     ) !usize {
         const prefix = prefix_ids.len;
         const kc = try sc.alloc([]f32, NLAYERS);
@@ -242,6 +248,10 @@ pub const P2G = struct {
             vc[l] = try sc.alloc(f32, MAXPOS * D);
         }
         const work = try sc.alloc(f32, 3 * D + MAXPOS); // stepLayer scratch
+        const align_buf = try sc.alloc(f32, MAXPOS); // head-summed attention scratch
+        if (align_out) |a| {
+            for (a) |*v| v.* = -1;
+        }
 
         // ---- prefill: full bidirectional forward over the prefix, caching K/V ----
         const xp = try sc.alloc(f32, prefix * D);
@@ -257,6 +267,7 @@ pub const P2G = struct {
         var tok: i64 = @intCast(k_reduce.argmax(logits));
         while (true) {
             if (tok == eos or tok == pad) break;
+            const emit_idx = n;
             out[n] = tok;
             n += 1;
             if (n >= max_new or cur >= MAXPOS) break;
@@ -265,7 +276,27 @@ pub const P2G = struct {
             const e = self.emb[@as(usize, @intCast(tok)) * D ..][0..D];
             const pe = self.pos[cur * D ..][0..D];
             for (0..D) |j| x[j] = e[j] + pe[j];
-            for (0..NLAYERS) |l| try self.stepLayer(self.layers[l], &x, kc[l], vc[l], cur, work);
+            if (align_out != null) @memset(align_buf[0 .. cur + 1], 0);
+            for (0..NLAYERS) |l| {
+                const acc: ?[]f32 = if (align_out != null and l == NLAYERS - 1) align_buf[0 .. cur + 1] else null;
+                try self.stepLayer(self.layers[l], &x, kc[l], vc[l], cur, acc, work);
+            }
+            // output->input alignment: phoneme position (in [2, prefix-1)) with the
+            // most attention from this token; index is 0-based into the source phonemes.
+            if (align_out) |a| {
+                if (prefix > 3) {
+                    var best: usize = 2;
+                    var bestv: f32 = align_buf[2];
+                    var j: usize = 3;
+                    while (j < prefix - 1) : (j += 1) {
+                        if (align_buf[j] > bestv) {
+                            bestv = align_buf[j];
+                            best = j;
+                        }
+                    }
+                    a[emit_idx] = @intCast(best - 2);
+                }
+            }
             cur += 1;
             k_ln.layerNormRow(&x, self.fn_w, self.fn_b, EPS);
             k_mm.linear(logits, &x, self.emb, null, 1, D, VOCAB);
@@ -445,6 +476,19 @@ test "p2g greedy decode matches PyTorch token ids" {
     // KV-cached decode must produce identical token ids.
     const out2 = try alloc.alloc(i64, exp.len + 4);
     defer alloc.free(out2);
-    const n2 = try model.greedyCached(arena.allocator(), prefix_ids, exp.len + 4, eos, pad, out2);
+    const n2 = try model.greedyCached(arena.allocator(), prefix_ids, exp.len + 4, eos, pad, out2, null);
     try t_.expectEqualSlices(i64, exp, out2[0..n2]);
+
+    // Alignment: one source-phoneme index per generated token, each in range, and
+    // requesting it must not change the decoded token ids.
+    const out3 = try alloc.alloc(i64, exp.len + 4);
+    defer alloc.free(out3);
+    const aln = try alloc.alloc(i64, exp.len + 4);
+    defer alloc.free(aln);
+    const n3 = try model.greedyCached(arena.allocator(), prefix_ids, exp.len + 4, eos, pad, out3, aln);
+    try t_.expectEqualSlices(i64, exp, out3[0..n3]);
+    // Engine alignment must match the PyTorch last-layer attention-argmax reference.
+    const ref_align = try fx.getI64(alloc, "align");
+    defer alloc.free(ref_align);
+    try t_.expectEqualSlices(i64, ref_align, aln[0..n3]);
 }

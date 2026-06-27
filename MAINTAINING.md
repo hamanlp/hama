@@ -35,6 +35,15 @@ tolerance (the discrete token-id/greedy checks still pass). So a P2G re-export i
 two `convert_torch.py` runs (one fp32 for the fixture, one `--fp16` for the
 shipped assets); the engine code is identical either way.
 
+P2G also exposes an output→input **alignment** (`P2GResult.alignments`): the
+last-layer attention-argmax over the source phoneme positions per generated token.
+The Zig greedy fixture (`zig/src/models/fixtures/p2g_greedy.hama`) carries an
+`align` tensor — PyTorch's genuine `nn.MultiheadAttention` weights (head-summed
+argmax over the phoneme columns), captured from the checkpoint via a forward
+pre-hook on the last encoder layer. `zig build test` asserts the engine's
+alignment matches it exactly. Regenerate it alongside the other P2G fixtures
+whenever the model is retrained.
+
 The shipped `libhama.*` / `hama.wasm` **do not contain weights** — so a
 weight-only model update needs **no recompile of the engine**, only regenerated
 `.hama`.

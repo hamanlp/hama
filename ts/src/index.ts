@@ -286,8 +286,11 @@ export {
   ASRNodeModel,
   decodeCtcTokens,
 } from "./asr.js";
+export { ctcPhonemeSpans, ASR_OUTPUT_FRAME_SAMPLES } from "./ctc.js";
+export type { PhonemeSpan } from "./ctc.js";
 export { P2GNodeModel } from "./p2g.js";
 export type { P2GOptions, P2GResult } from "./p2g.js";
+export type { P2GAlignment } from "./p2g-text.js";
 export type {
   ASRNodeOptions,
   ASRResult,
