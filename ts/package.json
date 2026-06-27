@@ -1,7 +1,7 @@
 {
   "name": "hama-js",
-  "version": "1.4.0",
-  "description": "G2P + phoneme-ASR inference for Node, Bun, and browsers, powered by a self-contained WASM engine (no onnxruntime).",
+  "version": "1.5.0",
+  "description": "G2P, phoneme-ASR, and P2G inference for Node, Bun, and browsers, powered by a self-contained WASM engine (no onnxruntime).",
   "homepage": "https://hamalnp.org",
   "repository": {
     "type": "git",
@@ -28,6 +28,14 @@
     "./asr": {
       "import": "./dist/node/index.js",
       "types": "./dist/types/index.d.ts"
+    },
+    "./p2g": {
+      "import": "./dist/node/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./p2g/browser": {
+      "import": "./dist/browser/browser.js",
+      "types": "./dist/types/browser.d.ts"
     },
     "./browser": {
       "import": "./dist/browser/browser.js",
@@ -70,10 +78,16 @@
       "asr": [
         "dist/types/index.d.ts"
       ],
+      "p2g": [
+        "dist/types/index.d.ts"
+      ],
       "g2p/browser": [
         "dist/types/browser.d.ts"
       ],
       "asr/browser": [
+        "dist/types/browser.d.ts"
+      ],
+      "p2g/browser": [
         "dist/types/browser.d.ts"
       ],
       "browser": [
@@ -89,10 +103,12 @@
   },
   "scripts": {
     "build": "bun run build:wasm && bun run build:node && bun run build:browser",
-    "build:wasm": "(cd ../zig && zig build wasm -Doptimize=ReleaseSmall) && cp ../zig/zig-out/bin/hama.wasm src/assets/hama.wasm",
+    "build:wasm": "(cd ../zig && zig build wasm) && cp ../zig/zig-out/bin/hama.wasm src/assets/hama.wasm",
     "build:node": "tsc -p tsconfig.node.json && rm -rf dist/node/assets && mkdir -p dist/node/assets && cp -R src/assets/. dist/node/assets",
     "build:browser": "tsc -p tsconfig.browser.json && rm -rf dist/browser/assets && mkdir -p dist/browser/assets && cp -R src/assets/. dist/browser/assets",
     "test": "bun test",
+    "demo:build": "bun build demo/main.ts --outdir demo/dist --format esm --target browser && cp demo/index.html demo/dist/index.html && mkdir -p demo/dist/assets && cp src/assets/hama.wasm src/assets/encoder.hama src/assets/decoder_step.hama src/assets/asr_waveform.hama src/assets/p2g.hama src/assets/p2g_vocab.json src/assets/g2p_vocab.json demo/dist/assets/",
+    "demo": "bun run demo:build && cd demo/dist && python3 -m http.server 8123 --bind 127.0.0.1",
     "prepublishOnly": "bun run build",
     "validate:model": "bun run scripts/validate-model.ts",
     "validate:model:split": "bun run scripts/validate-split-model.ts",

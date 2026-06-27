@@ -27,6 +27,9 @@ pub fn build(b: *std.Build) void {
     test_mod.addAnonymousImport("hama_encoder", .{ .root_source_file = b.path("models/encoder.hama") });
     test_mod.addAnonymousImport("hama_decoder", .{ .root_source_file = b.path("models/decoder_step.hama") });
     test_mod.addAnonymousImport("hama_asr", .{ .root_source_file = b.path("models/asr_waveform.hama") });
+    test_mod.addAnonymousImport("hama_p2g", .{ .root_source_file = b.path("models/p2g.hama") });
+    test_mod.addAnonymousImport("fixture_p2g_stage", .{ .root_source_file = b.path("src/models/fixtures/p2g_stage.hama") });
+    test_mod.addAnonymousImport("fixture_p2g_greedy", .{ .root_source_file = b.path("src/models/fixtures/p2g_greedy.hama") });
     test_mod.addAnonymousImport("fixture_encoder", .{ .root_source_file = b.path("src/models/fixtures/encoder_hello.hama") });
     test_mod.addAnonymousImport("fixture_decoder0", .{ .root_source_file = b.path("src/models/fixtures/decoder_step0.hama") });
     test_mod.addAnonymousImport("fixture_decoder1", .{ .root_source_file = b.path("src/models/fixtures/decoder_step1.hama") });
@@ -38,14 +41,23 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tests.step);
 
     // ----- freestanding WASM module (consumed by Bun/Node/browser) -----
+    // simd128 lets the explicit @Vector kernels lower to wasm SIMD (v128) instead
+    // of being scalarized — the difference between fast and ~60x slower for P2G.
+    // All current JS runtimes (Node 16+, Bun, modern browsers) support it.
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
+        .cpu_features_add = std.Target.wasm.featureSet(&.{.simd128}),
     });
+    const wasm_optimize = b.option(
+        std.builtin.OptimizeMode,
+        "wasm-optimize",
+        "Optimize mode for the wasm engine (default ReleaseSmall now that kernels are hand-vectorized)",
+    ) orelse .ReleaseSmall;
     const wasm_mod = b.createModule(.{
         .root_source_file = b.path("src/main_wasm.zig"),
         .target = wasm_target,
-        .optimize = .ReleaseSmall,
+        .optimize = wasm_optimize,
     });
     const wasm = b.addExecutable(.{
         .name = "hama",

@@ -286,6 +286,8 @@ export {
   ASRNodeModel,
   decodeCtcTokens,
 } from "./asr.js";
+export { P2GNodeModel } from "./p2g.js";
+export type { P2GOptions, P2GResult } from "./p2g.js";
 export type {
   ASRNodeOptions,
   ASRResult,

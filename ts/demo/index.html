@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>hama · engine playground</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1f242e; --line: #2a313d;
+    --text: #e6e9ef; --muted: #98a2b3; --accent: #7aa2ff; --accent2: #5cd6a8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; justify-content: center; padding: 32px 16px;
+  }
+  main { width: 100%; max-width: 720px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h1 .tag { color: var(--accent); }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .sub code { background: var(--panel2); padding: 1px 6px; border-radius: 5px; color: var(--accent2); }
+  .tabs { display: flex; gap: 6px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+  .tab {
+    background: none; border: 0; color: var(--muted); padding: 10px 16px; cursor: pointer;
+    font-size: 15px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab .dir { font-size: 12px; color: var(--muted); display: block; font-weight: 400; }
+  section.view { display: none; }
+  section.view.active { display: block; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 8px; }
+  textarea, input[type=text] {
+    width: 100%; min-height: 64px; resize: vertical; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 12px; font: 16px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+  button.go {
+    background: var(--accent); color: #0b1020; border: 0; border-radius: 8px; padding: 10px 20px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  button.go.alt { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+  button.go.rec { background: #e5687a; color: #fff; }
+  button.go:disabled { opacity: .5; cursor: default; }
+  .presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; }
+  .chip {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 12px; font-size: 13px; cursor: pointer;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .out { font-size: 24px; font-weight: 600; min-height: 36px; color: var(--accent2); word-break: break-word; font-family: ui-serif, Georgia, serif; }
+  .out.mono { font-family: ui-monospace, Menlo, monospace; font-size: 22px; }
+  .sub2 { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .sub2 b { color: var(--text); font-weight: 600; }
+  .tokens { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 13px; margin-top: 8px; word-break: break-word; }
+  .stat { color: var(--muted); font-size: 13px; min-height: 18px; }
+  .note { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+  .note b { color: var(--text); }
+  input[type=file] { color: var(--muted); font-size: 14px; }
+  audio { width: 100%; margin-top: 12px; filter: invert(.9) hue-rotate(180deg); }
+</style>
+</head>
+<body>
+<main>
+  <h1>hama <span class="tag">engine</span> playground</h1>
+  <p class="sub">
+    G2P, ASR, and P2G running entirely in your browser on the hand-written WASM engine
+    (<code>~39&nbsp;KB</code>, no onnxruntime). Each model's weights load on first use.
+  </p>
+
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-tab="g2p">G2P<span class="dir">text → phonemes</span></button>
+    <button class="tab" data-tab="asr">ASR<span class="dir">audio → phonemes</span></button>
+    <button class="tab" data-tab="p2g">P2G<span class="dir">phonemes → text</span></button>
+  </div>
+
+  <!-- ───────────── G2P ───────────── -->
+  <section class="view active" data-view="g2p">
+    <div class="panel">
+      <label for="g2p-in">Text (English or Korean)</label>
+      <textarea id="g2p-in" spellcheck="false">Mister Quilter is the apostle of the middle classes.</textarea>
+      <div class="presets" id="g2p-presets"></div>
+      <div class="row">
+        <button class="go" id="g2p-go" disabled>Phonemize ⌘↵</button>
+        <span class="stat" id="g2p-stat">Idle — click to load the G2P model (~4 MB).</span>
+      </div>
+    </div>
+    <div class="panel">
+      <label>IPA</label>
+      <div class="out mono" id="g2p-out">—</div>
+      <div class="sub2" id="g2p-display"></div>
+    </div>
+  </section>
+
+  <!-- ───────────── ASR ───────────── -->
+  <section class="view" data-view="asr">
+    <div class="panel">
+      <label>Audio in (upload a clip, or record from the mic)</label>
+      <div class="row">
+        <input type="file" id="asr-file" accept="audio/*" />
+        <button class="go alt rec" id="asr-rec">● Record</button>
+      </div>
+      <audio id="asr-audio" controls hidden></audio>
+      <div class="row">
+        <button class="go" id="asr-go" disabled>Transcribe</button>
+        <span class="stat" id="asr-stat">Idle — pick a clip; the ASR model (~5 MB) loads on first run.</span>
+      </div>
+    </div>
+    <div class="panel">
+      <label>Phonemes</label>
+      <div class="out mono" id="asr-out">—</div>
+      <div class="tokens" id="asr-words"></div>
+      <div class="row">
+        <button class="go alt" id="asr-send" hidden>→ Send to P2G</button>
+      </div>
+    </div>
+    <p class="note"><b>Tip:</b> clearest results on 16&nbsp;kHz English speech; any sample rate is resampled automatically. The word boundaries (<code>|</code>) sent to P2G are the ASR model's own predicted <code>&lt;wb&gt;</code> tokens — not VAD.</p>
+  </section>
+
+  <!-- ───────────── P2G ───────────── -->
+  <section class="view" data-view="p2g">
+    <div class="panel">
+      <label for="phon">Phoneme tokens (space-separated, <code>|</code> = word boundary)</label>
+      <textarea id="phon" spellcheck="false">aɪ | h ɛ ɹ i | k ɪ l t ɝ | æ m | eɪ</textarea>
+      <div class="presets" id="p2g-presets"></div>
+      <div class="row">
+        <button class="go" id="p2g-go" disabled>Convert ⌘↵</button>
+        <span class="stat" id="p2g-stat">Idle — click to load the P2G model (~29 MB).</span>
+      </div>
+    </div>
+    <div class="panel">
+      <label>Output text</label>
+      <div class="out" id="p2g-out">—</div>
+      <div class="tokens" id="p2g-tokens"></div>
+    </div>
+    <p class="note">
+      <b>Heads up:</b> P2G is a small (~7.3M-param) ~56% WER research model, so its text is
+      deliberately approximate (e.g. <i>quilter</i> → <i>kilter</i>). The demo is about engine speed and
+      exact-parity behavior, not transcription accuracy.
+    </p>
+  </section>
+</main>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

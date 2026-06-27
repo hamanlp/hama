@@ -19,3 +19,7 @@ zig/.zig-cache/
 
 # Regenerable per-node ORT oracle dumps (committed oracle is tests/fixtures/)
 tools/oracle_out/
+
+# P2G demo build output
+ts/demo/dist/
+demo/dist/

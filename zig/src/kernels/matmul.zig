@@ -4,6 +4,24 @@
 
 const std = @import("std");
 
+/// Vectorized dot product of two contiguous f32 slices (length n). Uses explicit
+/// SIMD so it stays fast even under ReleaseSmall and wasm `simd128`; the dominant
+/// cost in the projection/logits matmuls.
+pub inline fn dot(a: []const f32, b: []const f32, n: usize) f32 {
+    const W = 16;
+    const Vec = @Vector(W, f32);
+    var acc: Vec = @splat(0);
+    var p: usize = 0;
+    while (p + W <= n) : (p += W) {
+        const av: Vec = a[p..][0..W].*;
+        const bv: Vec = b[p..][0..W].*;
+        acc += av * bv;
+    }
+    var s: f32 = @reduce(.Add, acc);
+    while (p < n) : (p += 1) s += a[p] * b[p];
+    return s;
+}
+
 /// C[m,n] = A[m,k] @ B[k,n]  (all row-major). out.len == m*n.
 pub fn matmul(out: []f32, a: []const f32, b: []const f32, m: usize, k: usize, n: usize) void {
     std.debug.assert(a.len == m * k and b.len == k * n and out.len == m * n);
@@ -32,10 +50,7 @@ pub fn linear(out: []f32, x: []const f32, w: []const f32, bias: ?[]const f32, m:
         const orow = out[i * n ..][0..n];
         var j: usize = 0;
         while (j < n) : (j += 1) {
-            const wrow = w[j * k ..][0..k];
-            var acc: f32 = 0;
-            var p: usize = 0;
-            while (p < k) : (p += 1) acc += xrow[p] * wrow[p];
+            const acc = dot(xrow, w[j * k ..][0..k], k);
             orow[j] = if (bias) |bb| acc + bb[j] else acc;
         }
     }
@@ -64,9 +79,7 @@ pub fn gemm(
         while (j < n) : (j += 1) {
             var acc: f32 = 0;
             if (trans_b) {
-                const brow = b[j * k ..][0..k];
-                var p: usize = 0;
-                while (p < k) : (p += 1) acc += arow[p] * brow[p];
+                acc = dot(arow, b[j * k ..][0..k], k);
             } else {
                 var p: usize = 0;
                 while (p < k) : (p += 1) acc += arow[p] * b[p * n + j];

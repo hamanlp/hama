@@ -12,12 +12,14 @@ const pkg = @import("pkg.zig");
 const Enc = @import("models/g2p_encoder.zig");
 const Dec = @import("models/g2p_decoder.zig");
 const Asr = @import("models/asr.zig");
+const P2g = @import("models/p2g.zig");
 
 const galloc = std.heap.page_allocator;
 
 const EncoderHandle = struct { model: Enc.Encoder };
 const DecoderHandle = struct { model: Dec.Decoder };
 const AsrHandle = struct { model: Asr.Asr };
+const P2gHandle = struct { model: P2g.P2G };
 
 export fn hama_version() u32 {
     return 1;
@@ -156,4 +158,42 @@ export fn hama_asr_run(h: *AsrHandle, wav: [*]const f32, n: i64, log_probs: [*]f
     const got = h.model.forward(arena.allocator(), wav[0..N], log_probs[0 .. T * Asr.VOCAB]) catch return -1;
     out_length.* = @intCast(got);
     return @intCast(got);
+}
+
+fn loadP2g(data: [*]const u8, len: usize) !*P2gHandle {
+    var p = try pkg.parse(galloc, data[0..len]);
+    defer p.deinit();
+    const h = try galloc.create(P2gHandle);
+    h.model = try P2g.P2G.init(galloc, &p);
+    return h;
+}
+
+export fn hama_p2g_load(data: [*]const u8, len: usize) ?*P2gHandle {
+    return loadP2g(data, len) catch null;
+}
+
+export fn hama_p2g_free(h: ?*P2gHandle) void {
+    if (h) |hh| {
+        hh.model.deinit();
+        galloc.destroy(hh);
+    }
+}
+
+/// Greedy decode. prefix_ids is [bos, src, phones..., tgt]; out receives up to
+/// max_new generated token ids (excluding eos/pad). Returns the count, or -1.
+export fn hama_p2g_greedy(
+    h: *P2gHandle,
+    prefix_ids: [*]const i64,
+    prefix_len: i64,
+    max_new: i64,
+    eos: i64,
+    pad: i64,
+    out: [*]i64,
+) i64 {
+    const P: usize = @intCast(prefix_len);
+    const mn: usize = @intCast(max_new);
+    var arena = std.heap.ArenaAllocator.init(galloc);
+    defer arena.deinit();
+    const n = h.model.greedyCached(arena.allocator(), prefix_ids[0..P], mn, eos, pad, out[0..mn]) catch return -1;
+    return @intCast(n);
 }
