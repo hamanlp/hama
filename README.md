@@ -8,11 +8,14 @@ This repository packages hama inference runtimes. It ships:
 - a waveform-input phoneme ASR runtime
 - reproducible tests for both runtimes
 
-There is **no `onnxruntime` dependency**. The G2P encoder/decoder and the
-waveform ASR acoustic model are reimplemented from scratch in Zig (see `zig/`),
-compiled to a native shared library for Python (`ctypes`) and to one freestanding
-`hama.wasm` for TypeScript. The engine reproduces the previous ONNX Runtime
-outputs byte-for-byte on a committed golden corpus (`tests/fixtures/`).
+There is **no `onnxruntime` dependency**. The G2P encoder/decoder, the waveform
+ASR acoustic model, and the P2G decoder-only PrefixLM are reimplemented from
+scratch in Zig (see `zig/`), compiled to a native shared library for Python
+(`ctypes`) and to one freestanding `hama.wasm` (~39 KB) for TypeScript
+(Node/Bun/browser). The projection/matmul kernels are hand-vectorized with
+explicit SIMD, and the wasm build enables `simd128` (~4x faster P2G decode). The
+engine reproduces the previous ONNX Runtime outputs byte-for-byte on a committed
+golden corpus (`tests/fixtures/`).
 
 ## Assets
 
@@ -20,14 +23,17 @@ Package assets (under `python/src/hama/assets` and `ts/src/assets`) contain:
 
 - `encoder.hama` + `decoder_step.hama` (split G2P weight packages)
 - `asr_waveform.hama` (ASR waveform model weights)
-- `p2g.hama` + `p2g_vocab.json` (phoneme-to-grapheme PrefixLM)
+- `p2g.hama` + `p2g_vocab.json` (phoneme-to-grapheme PrefixLM; float16 weights, ~14.6 MB)
 - `g2p_vocab.json`
 - `hama.wasm` (TypeScript only)
 
-`.hama` files are flat weight archives converted from the source `.onnx` models
-(kept under the top-level `assets/`) via `tools/convert_onnx.py`. The native
-engine libraries ship under `python/src/hama/_libs/<platform>/` (built by
-`tools/build_libs.sh`).
+`.hama` files are flat weight archives loaded at runtime by the engine. The G2P
+and ASR packages are converted from build-time source `.onnx` models (kept under
+the top-level `assets/`) via `tools/convert_onnx.py`; the P2G package is converted
+directly from a PyTorch checkpoint via `tools/convert_torch.py` (no ONNX involved).
+`.onnx` is only a build-time source — the runtime never loads ONNX assets or
+depends on `onnxruntime`. The native engine libraries ship under
+`python/src/hama/_libs/<platform>/` (built by `tools/build_libs.sh`).
 
 ## Building the engine from source
 
@@ -36,9 +42,10 @@ Requires `zig>=0.16`.
 ```bash
 cd zig && zig build test     # run kernel + model unit tests (validated vs ORT)
 zig build                    # native shared library (zig-out/lib)
-zig build wasm               # freestanding hama.wasm (zig-out/bin)
+zig build wasm               # freestanding hama.wasm (simd128, ~39 KB; zig-out/bin)
 # regenerate artifacts after a model change:
-uv --project python run python tools/convert_onnx.py   # .onnx -> .hama
+uv --project python run python tools/convert_onnx.py   # G2P/ASR .onnx -> .hama
+uv --project python run python tools/convert_torch.py  # P2G checkpoint -> .hama
 bash tools/build_libs.sh                                # native libs for all wheel platforms
 ```
 
@@ -48,7 +55,8 @@ runbook). Models are produced upstream by `hama-training`.
 
 ## Python package (`python/`)
 
-Requirements: `uv>=0.3`, Python 3.9+.
+Requirements: `uv>=0.3`, Python 3.9+. The only runtime dependency is `numpy`
+(plus optional extras for tests/examples).
 
 ```bash
 cd python
@@ -138,7 +146,8 @@ For ASR, pass `model_path` if you want non-default `.hama` weights.
 
 ## TypeScript + Bun (`ts/`)
 
-Requirements: `bun>=1.1`.
+Requirements: `bun>=1.1`. The published `hama-js` package has **zero runtime
+dependencies**.
 
 ```bash
 cd ts
@@ -231,7 +240,8 @@ API overview:
 - Browser bundle:
   - `import { G2PBrowserModel } from "hama-js/g2p/browser";`
   - `import { ASRBrowserModel } from "hama-js/asr/browser";`
-  - `import { G2PBrowserModel, ASRBrowserModel } from "hama-js/browser";`
+  - `import { P2GBrowserModel } from "hama-js/p2g/browser";`
+  - `import { G2PBrowserModel, ASRBrowserModel, P2GBrowserModel } from "hama-js/browser";`
   - `G2PBrowserModel.create({ modelUrl?, encoderUrl?, decoderStepUrl?, ... })`
   - `ASRBrowserModel.create({ modelUrl?, vocabUrl?, sampleRate?, blankToken?, unkToken?, wordBoundaryToken?, blankBias?, unkBias?, collapseRepeats? })`
 

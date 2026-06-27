@@ -44,6 +44,12 @@ pre-hook on the last encoder layer. `zig build test` asserts the engine's
 alignment matches it exactly. Regenerate it alongside the other P2G fixtures
 whenever the model is retrained.
 
+ASR also exposes approximate per-phoneme **time spans** (`PhonemeSpan` /
+`ASRModel.phoneme_spans` / `model.phonemeSpans`, plus standalone
+`ctc_phoneme_spans` / `ctcPhonemeSpans`), tiling the CTC output-frame timeline.
+This is **pure post-processing** of the frame token-ids — no weights, no engine
+change, no fixture to regenerate — so an ASR retrain or re-export never touches it.
+
 The shipped `libhama.*` / `hama.wasm` **do not contain weights** — so a
 weight-only model update needs **no recompile of the engine**, only regenerated
 `.hama`.

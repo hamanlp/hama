@@ -28,6 +28,9 @@ Inference engine (since v1.4.0):
   (G2P/ASR already did); the engine upcasts to float32 at load.
 - v1.5.0 hand-vectorizes the matmul/projection kernels with explicit SIMD and enables
   wasm `simd128` (~4x faster P2G decode in the browser/Node); outputs are unchanged.
+- v1.6.0 adds approximate per-phoneme time spans for ASR (`phoneme_spans` /
+  `phonemeSpans`, plus standalone `ctc_phoneme_spans` / `ctcPhonemeSpans`) and
+  output-token attention alignments for P2G (`P2GResult.alignments`).
 - The engine reproduces the previous ONNX Runtime outputs byte-for-byte on a committed
   golden corpus (`tests/fixtures/`).
 
@@ -736,6 +739,7 @@ TypeScript package (`ts/package.json`)
 --------------------------------------
 - Name: `hama-js`
 - Node engine >= 18, Bun >= 1.1
+- Zero runtime dependencies (inference runs on the bundled `hama.wasm`)
 - Exports include:
   - root
   - `./g2p`
