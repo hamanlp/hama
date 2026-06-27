@@ -1,6 +1,6 @@
 {
   "name": "hama-js",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "G2P, phoneme-ASR, and P2G inference for Node, Bun, and browsers, powered by a self-contained WASM engine (no onnxruntime).",
   "homepage": "https://hamalnp.org",
   "repository": {

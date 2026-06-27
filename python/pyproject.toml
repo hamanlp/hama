@@ -1,6 +1,6 @@
 [project]
 name = "hama"
-version = "1.5.0"
+version = "1.6.0"
 description = "Cross-platform G2P, phoneme-ASR, and P2G inference, powered by a self-contained Zig engine (no onnxruntime)."
 readme = "README.md"
 requires-python = ">=3.9"

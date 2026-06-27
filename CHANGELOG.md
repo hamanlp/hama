@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.6.0 - 2026-06-28
+
+- Added ASR time alignment: `ASRModel.phoneme_spans(result)` (Python) and `ASRNodeModel` / `ASRBrowserModel.phonemeSpans(result)` (TypeScript), plus the standalone `ctc_phoneme_spans` / `ctcPhonemeSpans`, return approximate per-phoneme time spans (`PhonemeSpan` with start/end ms and frame indices) derived from the CTC frame alignment. CTC is peaky, so these are coarse acoustic spans; pure post-processing, no model change.
+- Added P2G output→input alignment: `P2GResult.alignments` (Python `P2GAlignment{token, phoneme_index, phoneme}`, TS `{token, phonemeIndex, phoneme}`), parallel to `tokens`, mapping each generated grapheme token to the source phoneme it most attends to. Derived from the decoder's last-layer attention (captured during the cached greedy decode — no extra forward pass).
+- The P2G alignment is validated against PyTorch's real `nn.MultiheadAttention` weights on a committed golden fixture, and the Python (native) and TypeScript (WASM) runtimes produce bit-identical alignments. No change to any existing output.
+- Aligned Python `hama` and TypeScript `hama-js` on version `1.6.0`.
+
 ## v1.5.0 - 2026-06-27
 
 - Added a phoneme-to-grapheme (P2G) modality: `P2GModel` (Python) and `P2GNodeModel` / `P2GBrowserModel` (TypeScript via `hama-js/p2g` and `hama-js/p2g/browser`). It turns a sequence of phoneme tokens into text.
