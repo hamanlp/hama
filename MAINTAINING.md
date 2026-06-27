@@ -15,6 +15,26 @@ The engine has two independent parts:
 | **Architecture** | `zig/src/models/*.zig` + `zig/src/kernels/*.zig` | Hand-written forward passes. Hard-codes layer shapes, the weight **names** it looks up, and constants (`hidden=96`, `d_model=256`, 11 backbone blocks, conv dilations `[1,1,2,2,4,1,1,2,2,4,1]`, 4 attn heads, `n_fft=400`/`hop=160`/`201` bins/`80` mel, vocab 189/191). |
 | **Weights** | `assets/*.hama` (shipped) | Flat weight archives loaded at **runtime**. |
 
+There are three models: G2P (`encoder.hama` + `decoder_step.hama`), ASR
+(`asr_waveform.hama`), and **P2G** (`p2g.hama` + `p2g_vocab.json`) — a decoder-only
+PrefixLM. The P2G model has **no ONNX**: its weights are converted directly from
+the PyTorch checkpoint (`tools/convert_torch.py`) and the Zig forward + KV-cached
+greedy decode are validated against PyTorch (`tests/fixtures/p2g_golden.json`).
+Its architecture constants live in `zig/src/models/p2g.zig`. To re-export after a
+P2G retrain (same architecture): run `tools/convert_torch.py` on the new
+`epoch-N.pt` (see `hama-training/docs/HAMA_LIBRARY_HANDOFF.md`), regenerate the
+golden fixtures, and rebuild — no engine change.
+
+The **shipped** P2G weights (`python/src/hama/assets/p2g.hama`,
+`ts/src/assets/p2g.hama`) are stored as **float16** (`--fp16`), which halves the
+file to 14.6 MB; the engine upcasts to float32 at load, so golden parity is exact.
+The **Zig test fixture** `zig/models/p2g.hama` is kept **float32** because the
+stage-validation test (`p2g forward matches PyTorch intermediates`) compares
+engine intermediates to fp32 PyTorch dumps within 2e-3 — fp16 weights exceed that
+tolerance (the discrete token-id/greedy checks still pass). So a P2G re-export is
+two `convert_torch.py` runs (one fp32 for the fixture, one `--fp16` for the
+shipped assets); the engine code is identical either way.
+
 The shipped `libhama.*` / `hama.wasm` **do not contain weights** — so a
 weight-only model update needs **no recompile of the engine**, only regenerated
 `.hama`.

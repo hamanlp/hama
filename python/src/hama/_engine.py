@@ -100,6 +100,12 @@ def _bind() -> None:
     L.hama_asr_run.argtypes = [ctypes.c_void_p, c_f32, ctypes.c_int64, c_f32, c_i64]
     L.hama_asr_run.restype = ctypes.c_int64
 
+    L.hama_p2g_load.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+    L.hama_p2g_load.restype = ctypes.c_void_p
+    L.hama_p2g_free.argtypes = [ctypes.c_void_p]
+    L.hama_p2g_greedy.argtypes = [ctypes.c_void_p, c_i64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64, c_i64]
+    L.hama_p2g_greedy.restype = ctypes.c_int64
+
 
 _bind()
 
@@ -243,4 +249,29 @@ class AsrSession:
     def __del__(self):
         if getattr(self, "_h", None) and _LIB is not None:
             _LIB.hama_asr_free(self._h)
+            self._h = None
+
+
+class P2gSession:
+    def __init__(self, data: bytes):
+        if _LIB is None:
+            raise RuntimeError("libhama not available")
+        self._h = _LIB.hama_p2g_load(data, len(data))
+        if not self._h:
+            raise RuntimeError("hama_p2g_load failed")
+
+    def greedy(self, prefix_ids: list[int], max_new: int, eos_id: int, pad_id: int) -> list[int]:
+        prefix = np.ascontiguousarray(prefix_ids, dtype=np.int64)
+        out = np.empty(max_new, dtype=np.int64)
+        n = _LIB.hama_p2g_greedy(
+            self._h, prefix.ctypes.data_as(c_i64), prefix.shape[0], max_new, eos_id, pad_id,
+            out.ctypes.data_as(c_i64),
+        )
+        if n < 0:
+            raise RuntimeError("hama_p2g_greedy failed")
+        return out[:n].tolist()
+
+    def __del__(self):
+        if getattr(self, "_h", None) and _LIB is not None:
+            _LIB.hama_p2g_free(self._h)
             self._h = None

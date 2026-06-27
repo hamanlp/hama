@@ -6,6 +6,7 @@ Overview
 hama is a cross-platform inference library for:
 1. Grapheme-to-phoneme (G2P)
 2. Audio-to-phoneme ASR (CTC-based acoustic encoder)
+3. Phoneme-to-grapheme (P2G, decoder-only PrefixLM transformer)
 
 It ships two runtimes in one monorepo:
 - Python package: `hama`
@@ -74,6 +75,7 @@ Python and TS embed these assets under package-specific `assets/` directories:
 - `encoder.hama`          (G2P encoder weights)
 - `decoder_step.hama`     (G2P decoder-step weights)
 - `asr_waveform.hama`     (ASR waveform model weights)
+- `p2g.hama`              (P2G PrefixLM weights) + `p2g_vocab.json`
 - `g2p_vocab.json`
 - `hama.wasm`             (TypeScript only — the engine)
 
@@ -219,6 +221,8 @@ Core exports from `hama`
 - `G2PModel`
 - `G2PResult`
 - `G2PAlignment`
+- `P2GModel`
+- `P2GResult`
 - `PronunciationTerm`
 - `PronunciationMatch`
 - `PronunciationPatch`
@@ -265,6 +269,17 @@ Notes:
 - `display_ipa` equals `ipa` by default.
 - With `preserve_literals="punct"`, punctuation is kept in `display_ipa` without
   changing canonical `ipa`.
+
+
+P2GModel (phoneme-to-grapheme)
+------------------------------
+Decoder-only PrefixLM that turns phoneme tokens into text (inverse of G2P).
+- `P2GModel(model_path=None, vocab_path=None)`
+- `predict(phonemes) -> P2GResult` ; `__call__` delegates to `predict`
+  - `phonemes`: a list of phoneme tokens or a space-separated string (`|` = word boundary)
+- `P2GResult`: `text: str`, `tokens: list[str]` (raw decoded char tokens)
+- TS: `P2GNodeModel` (`hama-js/p2g`) and `P2GBrowserModel` (`hama-js/p2g/browser`),
+  both with `await create()` then `predict(phonemes)`.
 
 
 Pronunciation transcript correction (Python)

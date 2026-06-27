@@ -1,4 +1,4 @@
-# hama – cross-platform G2P + ASR inference
+# hama – cross-platform G2P + ASR + P2G inference
 
 This repository packages hama inference runtimes. It ships:
 
@@ -20,6 +20,7 @@ Package assets (under `python/src/hama/assets` and `ts/src/assets`) contain:
 
 - `encoder.hama` + `decoder_step.hama` (split G2P weight packages)
 - `asr_waveform.hama` (ASR waveform model weights)
+- `p2g.hama` + `p2g_vocab.json` (phoneme-to-grapheme PrefixLM)
 - `g2p_vocab.json`
 - `hama.wasm` (TypeScript only)
 
@@ -281,6 +282,34 @@ Key behavior:
   slightly earlier candidate does not automatically win
 
 Release notes live in [`CHANGELOG.md`](/Users/seongmin/hama/CHANGELOG.md).
+
+## Phoneme-to-grapheme (P2G)
+
+`P2GModel` turns a sequence of phoneme tokens into text (the inverse of G2P),
+using a decoder-only PrefixLM run by the engine with KV-cached greedy decode.
+
+Python:
+
+```python
+from hama import P2GModel
+
+p2g = P2GModel()
+result = p2g.predict(["l", "ɛ", "t", "|", "m", "e", "|", "s", "i"])
+print(result.text)    # -> "let me see"
+```
+
+TypeScript:
+
+```ts
+import { P2GNodeModel } from "hama-js/p2g";              // or "hama-js/p2g/browser"
+
+const p2g = await P2GNodeModel.create();
+const result = p2g.predict(["l", "ɛ", "t", "|", "m", "e", "|", "s", "i"]);
+console.log(result.text);
+```
+
+Phonemes may be passed as a token list or a space-separated string (`|` marks word
+boundaries). `result.tokens` holds the raw decoded character tokens.
 
 ## Shared design notes
 

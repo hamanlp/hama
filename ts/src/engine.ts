@@ -24,6 +24,10 @@ interface WasmExports {
   hama_asr_load: (data: number, len: number) => number;
   hama_asr_num_frames: (n: number) => number;
   hama_asr_run: (h: number, wav: number, n: number, logProbs: number, outLen: number) => number;
+  hama_p2g_load: (data: number, len: number) => number;
+  hama_p2g_greedy: (
+    h: number, prefixIds: number, prefixLen: number, maxNew: number, eos: bigint, pad: bigint, out: number,
+  ) => bigint;
 }
 
 export const ENC_FEAT = 192;
@@ -78,13 +82,14 @@ export class HamaEngine {
     return new BigInt64Array(this.ex.memory.buffer, ptr, len).slice();
   }
 
-  private loadModel(kind: "encoder" | "decoder" | "asr", bytes: Uint8Array): number {
+  private loadModel(kind: "encoder" | "decoder" | "asr" | "p2g", bytes: Uint8Array): number {
     const ptr = this.ex.hama_alloc(bytes.length);
     if (ptr === 0) throw new Error("hama_alloc failed");
     this.writeBytes(ptr, bytes);
     const fn = kind === "encoder" ? this.ex.hama_encoder_load
       : kind === "decoder" ? this.ex.hama_decoder_load
-        : this.ex.hama_asr_load;
+        : kind === "asr" ? this.ex.hama_asr_load
+          : this.ex.hama_p2g_load;
     const h = fn(ptr, bytes.length);
     this.ex.hama_free(ptr, bytes.length);
     if (h === 0) throw new Error(`hama_${kind}_load failed`);
@@ -99,6 +104,23 @@ export class HamaEngine {
   }
   loadAsr(bytes: Uint8Array): number {
     return this.loadModel("asr", bytes);
+  }
+  loadP2g(bytes: Uint8Array): number {
+    return this.loadModel("p2g", bytes);
+  }
+
+  /** Greedy decode: prefixIds = [bos, src, phones..., tgt]; returns generated token ids. */
+  p2gGreedy(h: number, prefixIds: BigInt64Array, maxNew: number, eos: number, pad: number): number[] {
+    const P = prefixIds.length;
+    const pPtr = this.ex.hama_alloc(P * 8);
+    const outPtr = this.ex.hama_alloc(maxNew * 8);
+    this.writeI64(pPtr, prefixIds);
+    const n = Number(this.ex.hama_p2g_greedy(h, pPtr, P, maxNew, BigInt(eos), BigInt(pad), outPtr));
+    if (n < 0) throw new Error("hama_p2g_greedy failed");
+    const out = this.readI64(outPtr, maxNew);
+    this.ex.hama_free(pPtr, P * 8);
+    this.ex.hama_free(outPtr, maxNew * 8);
+    return Array.from(out.slice(0, n), Number);
   }
 
   encoderRun(h: number, ids: BigInt64Array, length: number): EncoderOut {

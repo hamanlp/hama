@@ -16,6 +16,7 @@ from .asr import (
     read_wav_mono,
 )
 from .inference import G2PAlignment, G2PModel, G2PResult
+from .p2g import P2GModel, P2GResult
 from .pronunciation import (
     PronunciationMatch,
     PronunciationPatch,
@@ -36,6 +37,8 @@ __all__ = [
     "G2PAlignment",
     "G2PModel",
     "G2PResult",
+    "P2GModel",
+    "P2GResult",
     "PronunciationTerm",
     "PronunciationMatch",
     "PronunciationPatch",

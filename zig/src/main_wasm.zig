@@ -9,12 +9,14 @@ const pkg = @import("pkg.zig");
 const Enc = @import("models/g2p_encoder.zig");
 const Dec = @import("models/g2p_decoder.zig");
 const Asr = @import("models/asr.zig");
+const P2g = @import("models/p2g.zig");
 
 const galloc = std.heap.wasm_allocator;
 
 const EncoderHandle = struct { model: Enc.Encoder };
 const DecoderHandle = struct { model: Dec.Decoder };
 const AsrHandle = struct { model: Asr.Asr };
+const P2gHandle = struct { model: P2g.P2G };
 
 export fn hama_version() u32 {
     return 1;
@@ -122,4 +124,22 @@ export fn hama_asr_run(h: u32, wav: u32, n: u32, log_probs: u32, out_length: u32
     const olp: *i64 = @ptrFromInt(@as(usize, out_length));
     olp.* = @intCast(got);
     return @intCast(got);
+}
+
+export fn hama_p2g_load(data: u32, len: u32) u32 {
+    var p = pkg.parse(galloc, cslice(u8, data, len)) catch return 0;
+    defer p.deinit();
+    const h = galloc.create(P2gHandle) catch return 0;
+    h.model = P2g.P2G.init(galloc, &p) catch return 0;
+    return @intCast(@intFromPtr(h));
+}
+
+export fn hama_p2g_greedy(h: u32, prefix_ids: u32, prefix_len: u32, max_new: u32, eos: i64, pad: i64, out: u32) i64 {
+    const handle: *P2gHandle = @ptrFromInt(@as(usize, h));
+    const P: usize = prefix_len;
+    const mn: usize = max_new;
+    var arena = std.heap.ArenaAllocator.init(galloc);
+    defer arena.deinit();
+    const n = handle.model.greedyCached(arena.allocator(), cslice(i64, prefix_ids, P), mn, eos, pad, slice(i64, out, mn)) catch return -1;
+    return @intCast(n);
 }

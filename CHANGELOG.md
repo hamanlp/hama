@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.5.0 - 2026-06-27
+
+- Added a phoneme-to-grapheme (P2G) modality: `P2GModel` (Python) and `P2GNodeModel` / `P2GBrowserModel` (TypeScript via `hama-js/p2g` and `hama-js/p2g/browser`). It turns a sequence of phoneme tokens into text.
+- The model is a decoder-only PrefixLM (char-level transformer, 7.30M params) reimplemented from scratch in the Zig engine: learned positional embeddings, 4 pre-norm transformer blocks with a PrefixLM attention mask (bidirectional source prefix, causal target), tied output projection, and KV-cached greedy decode.
+- No onnxruntime and no ONNX export: the weights are converted directly from the PyTorch checkpoint to a `.hama` package (`tools/convert_torch.py`). The Zig forward + decode are validated stage-by-stage against PyTorch, and reproduce the reference token ids and rendered text exactly on a committed golden corpus (`tests/fixtures/p2g_golden.json`).
+- Performance: the projection/matmul kernels are now hand-vectorized with explicit SIMD, and the WASM build enables `simd128`. P2G decode is ~4x faster in the browser/Node (the dominant per-token vocab projection now runs on wasm SIMD) while `hama.wasm` stays small (~39 KB). No change to outputs — full G2P/ASR/P2G golden parity is preserved.
+- Size: the shipped P2G weights (`p2g.hama`) are stored as float16, halving the model from 29 MB to 14.6 MB (the Python wheel drops from ~41 MB to ~23 MB). The engine upcasts to float32 at load and computes in float32, so the golden corpus is reproduced exactly — float16 storage passes the same token-id/text parity gate as float32.
+- Aligned Python `hama` and TypeScript `hama-js` on version `1.5.0`.
+
 ## v1.4.0 - 2026-06-24
 
 - Replaced ONNX Runtime with a self-contained inference engine written from scratch in Zig. `onnxruntime` (Python) and `onnxruntime-node` / `onnxruntime-web` (TypeScript) are no longer dependencies.

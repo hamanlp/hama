@@ -14,10 +14,12 @@ pub const gru = @import("kernels/gru.zig");
 pub const g2p_encoder = @import("models/g2p_encoder.zig");
 pub const g2p_decoder = @import("models/g2p_decoder.zig");
 pub const asr = @import("models/asr.zig");
+pub const p2g = @import("models/p2g.zig");
 
 test {
     _ = @import("models/g2p.zig");
     _ = @import("models/asr.zig");
+    _ = @import("models/p2g.zig");
     _ = @import("pkg.zig");
     _ = @import("f16.zig");
     _ = @import("kernels/matmul.zig");
