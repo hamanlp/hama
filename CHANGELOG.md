@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.7.0 - 2026-07-19
+
+- Replaced the shipped v2 phoneme ASR encoder with the v3 epoch-3 EMA Conformer from `hama-training`. The waveform ABI, 191-token vocabulary, 320-sample output-frame timing, and public APIs are unchanged.
+- The v3 encoder has 2,005,535 parameters and four 144-channel Conformer blocks. Its shipped fp16 weight archive is 4,723,088 bytes. The Zig forward pass implements macaron FFNs, four-head self-attention, and GLU/depthwise-convolution modules directly for native and WASM inference.
+- Updated the default ASR decode temperature from `1.0` to the benchmarked `0.95` in Python, Node, and browser runtimes; blank bias remains `-0.1`.
+- Epoch-3 EMA PER is 22.08% on the 36,359-row robust test and 22.60% on the legacy 5,559-row test. The LibriSpeech slice is 14.76% (clean 10.94%, other 18.71%).
+- Regenerated ASR assets, stage fixtures, native libraries, WASM, and public goldens. Validation passes 31 Zig tests, 86 Python tests, and 85 TypeScript/WASM tests.
+
 ## v1.6.0 - 2026-06-28
 
 - Added ASR time alignment: `ASRModel.phoneme_spans(result)` (Python) and `ASRNodeModel` / `ASRBrowserModel.phonemeSpans(result)` (TypeScript), plus the standalone `ctc_phoneme_spans` / `ctcPhonemeSpans`, return approximate per-phoneme time spans (`PhonemeSpan` with start/end ms and frame indices) derived from the CTC frame alignment. CTC is peaky, so these are coarse acoustic spans; pure post-processing, no model change.

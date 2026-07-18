@@ -11,7 +11,7 @@ This repository packages hama inference runtimes. It ships:
 There is **no `onnxruntime` dependency**. The G2P encoder/decoder, the waveform
 ASR acoustic model, and the P2G decoder-only PrefixLM are reimplemented from
 scratch in Zig (see `zig/`), compiled to a native shared library for Python
-(`ctypes`) and to one freestanding `hama.wasm` (~39 KB) for TypeScript
+(`ctypes`) and to one freestanding `hama.wasm` (~47 KB) for TypeScript
 (Node/Bun/browser). The projection/matmul kernels are hand-vectorized with
 explicit SIMD, and the wasm build enables `simd128` (~4x faster P2G decode). The
 engine reproduces the previous ONNX Runtime outputs byte-for-byte on a committed
@@ -22,7 +22,7 @@ golden corpus (`tests/fixtures/`).
 Package assets (under `python/src/hama/assets` and `ts/src/assets`) contain:
 
 - `encoder.hama` + `decoder_step.hama` (split G2P weight packages)
-- `asr_waveform.hama` (ASR waveform model weights)
+- `asr_waveform.hama` (v3 Conformer ASR waveform weights, ~4.7 MB)
 - `p2g.hama` + `p2g_vocab.json` (phoneme-to-grapheme PrefixLM; float16 weights, ~14.6 MB)
 - `g2p_vocab.json`
 - `hama.wasm` (TypeScript only)
@@ -42,7 +42,7 @@ Requires `zig>=0.16`.
 ```bash
 cd zig && zig build test     # run kernel + model unit tests (validated vs ORT)
 zig build                    # native shared library (zig-out/lib)
-zig build wasm               # freestanding hama.wasm (simd128, ~39 KB; zig-out/bin)
+zig build wasm               # freestanding hama.wasm (simd128, ~47 KB; zig-out/bin)
 # regenerate artifacts after a model change:
 uv --project python run python tools/convert_onnx.py   # G2P/ASR .onnx -> .hama
 uv --project python run python tools/convert_torch.py  # P2G checkpoint -> .hama
@@ -228,7 +228,7 @@ API overview:
 - `displayIpa` preserves punctuation only when requested; canonical `ipa` stays
   punctuation-free
 - `alignments[].charIndex` is `-1` only for whitespace-only input
-- `ASRNodeModel.create({ modelPath?, vocabPath?, sampleRate?, blankToken?, unkToken?, wordBoundaryToken?, blankBias?, unkBias? })`
+- `ASRNodeModel.create({ modelPath?, vocabPath?, sampleRate?, blankToken?, unkToken?, wordBoundaryToken?, temperature?, blankBias?, unkBias? })`
 - `model.transcribeWavFile(path)` and `model.transcribeWaveform(samples, sampleRate)` for zero-dependency WAV/waveform inference
 - waveform-input ASR is the only supported public path in both runtimes
 - `ASRNodeModel.inputFormat` is always `"waveform"`
@@ -243,7 +243,7 @@ API overview:
   - `import { P2GBrowserModel } from "hama-js/p2g/browser";`
   - `import { G2PBrowserModel, ASRBrowserModel, P2GBrowserModel } from "hama-js/browser";`
   - `G2PBrowserModel.create({ modelUrl?, encoderUrl?, decoderStepUrl?, ... })`
-  - `ASRBrowserModel.create({ modelUrl?, vocabUrl?, sampleRate?, blankToken?, unkToken?, wordBoundaryToken?, blankBias?, unkBias?, collapseRepeats? })`
+  - `ASRBrowserModel.create({ modelUrl?, vocabUrl?, sampleRate?, blankToken?, unkToken?, wordBoundaryToken?, temperature?, blankBias?, unkBias?, collapseRepeats? })`
 
 The package copies `assets/*.hama` + `hama.wasm` + `g2p_vocab.json` into `dist`
 so Node/Bun resolves them via `import.meta.url`. For browser deployments, host
@@ -334,7 +334,7 @@ it most attends to, parallel to `tokens`.
 - Both runtimes use identical Hangul jamo logic so character indices map back to
   the original graphemes, even after jamo expansion.
 - ASR uses the same decoder vocabulary base (`g2p_vocab.json` decoder + `<wb>` + `<blank>`).
-- ASR uses the waveform model weights `asr_waveform.hama`.
+- ASR uses the v3 Conformer waveform weights `asr_waveform.hama`; the training-aligned decode defaults are `temperature=0.95` and `blank_bias=-0.1`.
 - TS file input currently supports WAV only (PCM 8/16/24/32-bit int, and 32-bit float WAV).
 - Inputs are case-normalized (lowercased in both Python and TS) and
   whitespace is ignored during tokenization.

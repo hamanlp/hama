@@ -137,7 +137,7 @@ export class ASRNodeModel {
       blankToken: options.blankToken ?? "<blank>",
       unkToken: options.unkToken ?? "<unk>",
       wordBoundaryToken: options.wordBoundaryToken ?? "<wb>",
-      temperature: options.temperature ?? 1.0,
+      temperature: options.temperature ?? 0.95,
       blankBias: options.blankBias ?? -0.1,
       unkBias: options.unkBias ?? 0.0,
       collapseRepeats: options.collapseRepeats ?? true,

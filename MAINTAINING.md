@@ -12,7 +12,7 @@ The engine has two independent parts:
 
 | Part | Lives in | What it is |
 |---|---|---|
-| **Architecture** | `zig/src/models/*.zig` + `zig/src/kernels/*.zig` | Hand-written forward passes. Hard-codes layer shapes, the weight **names** it looks up, and constants (`hidden=96`, `d_model=256`, 11 backbone blocks, conv dilations `[1,1,2,2,4,1,1,2,2,4,1]`, 4 attn heads, `n_fft=400`/`hop=160`/`201` bins/`80` mel, vocab 189/191). |
+| **Architecture** | `zig/src/models/*.zig` + `zig/src/kernels/*.zig` | Hand-written forward passes. Hard-codes layer shapes, weight **names**, and constants. The current ASR is v3 Conformer: `d_model=144`, 4 blocks, FF expansion 4, 4 heads, conv kernel 31, `n_fft=400`/`hop=160`/80 mel, and vocab 191. |
 | **Weights** | `assets/*.hama` (shipped) | Flat weight archives loaded at **runtime**. |
 
 There are three models: G2P (`encoder.hama` + `decoder_step.hama`), ASR
@@ -53,6 +53,13 @@ change, no fixture to regenerate — so an ASR retrain or re-export never touche
 The shipped `libhama.*` / `hama.wasm` **do not contain weights** — so a
 weight-only model update needs **no recompile of the engine**, only regenerated
 `.hama`.
+
+The production ASR source is the epoch-3 **EMA** weight set from
+`hama-training/asr_outputs/v3_conformer_robust_loq_mls_fleurs_voxpopuli_mdc26_3epoch/asr-20260627-125148/epoch-3.pt`, exported with
+`configs/asr_v3_conformer_robust_loq_mls_fleurs_voxpopuli_mdc26_3epoch.yaml`.
+Its checkpoint SHA-256 is `c423129c0f56062faba441107d1f6cbd86d3234bfbde10dbc9f84b96631e555b`.
+Always pass `--checkpoint-weights ema`; the raw and EMA weights are distinct even
+though they share one checkpoint file.
 
 ## Where models come from
 
@@ -135,8 +142,8 @@ construction — add a target line to `tools/build_libs.sh` to cover more.
 
 ## Sharp edge: auto-generated weight names
 
-The Zig forward passes look up 29 weights by **auto-generated ONNX names** such
-as `onnx::GRU_527`, `onnx::Conv_666`, `onnx::MatMul_712` (counter-based, assigned
+The Zig forward passes look up some weights by **auto-generated ONNX names** such
+as `onnx::GRU_527`, `onnx::Conv_801`, and `onnx::MatMul_829` (counter-based, assigned
 by the PyTorch→ONNX exporter). They are **stable across retrains with the same
 export script + torch version**, but can shift if the export changes (new torch,
 reordered modules, added layers). If they shift, `convert_onnx.py` still runs but

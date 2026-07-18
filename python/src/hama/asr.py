@@ -17,7 +17,7 @@ class ASRDecodeConfig:
     blank_token: str = "<blank>"
     word_boundary_token: str = "<wb>"
     unk_token: str = "<unk>"
-    temperature: float = 1.0
+    temperature: float = 0.95
     blank_bias: float = -0.1
     unk_bias: float = 0.0
     collapse_repeats: bool = True

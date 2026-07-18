@@ -195,12 +195,11 @@ def asr_fixture(wav: str = "short_100ms_16k.wav") -> None:
         "stft_real": "/Conv_output_0",
         "logmel": "/Log_output_0",
         "stem": "/acoustic_model/stem/stem.2/Mul_1_output_0",
-        "attn1": "/acoustic_model/export_attn_layers.1/Add_4_output_0",
         "log_probs": "log_probs",
         "out_lengths": "out_lengths",
     }
-    for i in range(11):
-        want[f"backbone{i}"] = f"/acoustic_model/backbone/backbone.{i}/Add_output_0"
+    for i in range(4):
+        want[f"block{i}"] = f"/acoustic_model/export_blocks.{i}/norm/LayerNormalization_output_0"
     outs = dict(zip(want.keys(), sess.run(list(want.values()), feeds)))
     T_stft = outs["stft_real"].shape[2]
     T = int(outs["out_lengths"].reshape(-1)[0])
@@ -209,13 +208,12 @@ def asr_fixture(wav: str = "short_100ms_16k.wav") -> None:
         "waveform_length": np.array([waveform.shape[0]], dtype=np.int64),
         "stft_real": np.ascontiguousarray(outs["stft_real"].reshape(201, T_stft).astype(np.float32)),
         "logmel": np.ascontiguousarray(outs["logmel"].reshape(T_stft, 80).astype(np.float32)),
-        "stem": np.ascontiguousarray(outs["stem"].reshape(256, T).astype(np.float32)),
-        "attn1": np.ascontiguousarray(outs["attn1"].reshape(T, 256).astype(np.float32)),
+        "stem": np.ascontiguousarray(outs["stem"].reshape(144, T).astype(np.float32)),
         "log_probs": np.ascontiguousarray(outs["log_probs"].reshape(T, 191).astype(np.float32)),
         "out_length": np.array([T], dtype=np.int64),
     }
-    for i in range(11):
-        tensors[f"backbone{i}"] = np.ascontiguousarray(outs[f"backbone{i}"].reshape(256, T).astype(np.float32))
+    for i in range(4):
+        tensors[f"block{i}"] = np.ascontiguousarray(outs[f"block{i}"].reshape(T, 144).astype(np.float32))
     pack(OUT / "asr_short.hama", tensors)
     print(f"asr fixture -> T_stft={T_stft} T={T}  (wav={wav}, N={waveform.shape[0]})")
 
